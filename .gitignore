@@ -1,0 +1,15 @@
+# the vault is your personal notebook — its own git repo, never part of the app repo
+vault/
+
+# node
+node_modules/
+ceremony/dist/
+ceremony/dev-dist/
+
+# python
+agent/.venv/
+__pycache__/
+*.pyc
+
+# os
+.DS_Store

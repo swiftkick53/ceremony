@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ceremony",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "ceremony"],
+      "port": 5173
+    },
+    {
+      "name": "agent",
+      "runtimeExecutable": "agent/.venv/bin/uvicorn",
+      "runtimeArgs": ["main:app", "--port", "8014", "--app-dir", "agent"],
+      "port": 8014
+    }
+  ]
+}

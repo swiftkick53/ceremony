@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600&amp;family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;0,6..96,600;1,6..96,400;1,6..96,500&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:oklch(0.95 0.012 85);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+  *{box-sizing:border-box;}
+  button{-webkit-tap-highlight-color:transparent;}
+  textarea::placeholder{color:oklch(0.6 0.01 70);}
+  @keyframes cerpulse{0%,100%{opacity:1}50%{opacity:0.35}}
+</style>
+</helmet>
+
+<div style="width:100%;height:100vh;max-width:430px;margin:0 auto;background:oklch(0.95 0.012 85);display:flex;flex-direction:column;color:oklch(0.2 0.01 70);position:relative;overflow:hidden;">
+
+  <!-- ============ SHARED HEADER ============ -->
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 24px 14px;border-bottom:1px solid oklch(0.2 0.01 70 / 0.12);flex:0 0 auto;">
+    <span style="width:36px;flex:0 0 auto;"></span>
+    <span style="font-family:'Jost',sans-serif;font-size:10px;letter-spacing:0.34em;text-transform:uppercase;color:oklch(0.55 0.01 70);">Ceremony</span>
+    <span style="font-family:'Space Mono',monospace;font-size:10px;letter-spacing:0.14em;color:oklch(0.5 0.01 70);">{{ clock }}</span>
+  </div>
+
+  <!-- ============ CAPTURE ============ -->
+  <sc-if value="{{ isCapture }}" hint-placeholder-val="{{ true }}">
+    <div data-screen-label="Capture" style="flex:1;min-height:0;display:flex;flex-direction:column;overflow-y:auto;">
+      <div style="padding:24px 28px 4px;flex:0 0 auto;">
+        <sc-if value="{{ isIdle }}" hint-placeholder-val="{{ true }}"><div style="font-family:'Bodoni Moda',serif;font-size:33px;line-height:1.06;font-weight:500;">Speak, and it is filed.</div></sc-if>
+        <sc-if value="{{ isRec }}"><div style="display:flex;align-items:baseline;gap:14px;"><span style="font-family:'Space Mono',monospace;font-size:33px;">{{ timer }}</span><span style="font-family:'Jost',sans-serif;font-size:11px;letter-spacing:0.3em;text-transform:uppercase;color:oklch(0.55 0.15 300);">Listening</span><span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:0.14em;color:oklch(0.6 0.01 70);margin-left:auto;">{{ micMode }}</span></div></sc-if>
+        <sc-if value="{{ isProc }}"><div style="font-family:'Bodoni Moda',serif;font-size:28px;font-style:italic;">Reading the vault…</div></sc-if>
+        <sc-if value="{{ isRouted }}"><div style="font-family:'Bodoni Moda',serif;font-size:33px;font-weight:500;">Filed.</div></sc-if>
+        <sc-if value="{{ isType }}"><div style="font-family:'Bodoni Moda',serif;font-size:28px;font-weight:500;">Write, and it is filed.</div></sc-if>
+      </div>
+
+      <sc-if value="{{ vizShown }}" hint-placeholder-val="{{ true }}">
+        <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:8px 28px;min-height:230px;">
+          <div style="position:relative;width:100%;max-width:300px;aspect-ratio:1;">
+            {{ viz }}
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">
+              <sc-if value="{{ isIdle }}" hint-placeholder-val="{{ true }}"><button onClick="{{ onStart }}" style="width:112px;height:112px;border-radius:50%;border:1px solid oklch(0.2 0.01 70);background:oklch(0.95 0.012 85);color:oklch(0.2 0.01 70);font-family:'Jost',sans-serif;font-size:13px;letter-spacing:0.24em;cursor:pointer;transition:all .25s;" style-hover="background:oklch(0.2 0.01 70);color:oklch(0.95 0.012 85);">BEGIN</button></sc-if>
+              <sc-if value="{{ isRec }}"><button onClick="{{ onEnd }}" style="width:112px;height:112px;border-radius:50%;border:none;background:oklch(0.55 0.15 300);color:oklch(0.97 0.02 300);font-family:'Jost',sans-serif;font-size:13px;letter-spacing:0.24em;cursor:pointer;">END</button></sc-if>
+              <sc-if value="{{ isProc }}"><div style="width:112px;height:112px;border-radius:50%;border:1px dashed oklch(0.5 0.01 70);display:flex;align-items:center;justify-content:center;font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:0.08em;color:oklch(0.5 0.01 70);text-align:center;line-height:1.5;animation:cerpulse 1.4s ease-in-out infinite;">38<br>PAGES</div></sc-if>
+              <sc-if value="{{ isRouted }}"><button onClick="{{ onReset }}" style="width:112px;height:112px;border-radius:50%;border:1px solid oklch(0.2 0.01 70);background:oklch(0.95 0.012 85);color:oklch(0.2 0.01 70);font-family:'Jost',sans-serif;font-size:12px;letter-spacing:0.2em;cursor:pointer;transition:all .25s;" style-hover="background:oklch(0.2 0.01 70);color:oklch(0.95 0.012 85);">AGAIN</button></sc-if>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <div style="padding:0 28px 22px;flex:0 0 auto;">
+        <sc-if value="{{ isRec }}">
+          <div style="font-family:'Bodoni Moda',serif;font-size:16px;line-height:1.55;color:oklch(0.36 0.01 70);height:118px;overflow:hidden;display:flex;flex-direction:column-reverse;"><div>{{ transcript }}<span style="color:oklch(0.55 0.15 300);">&nbsp;▍</span></div></div>
+          <button onClick="{{ onAbandon }}" style="width:100%;margin-top:12px;padding:13px;border:1px solid oklch(0.2 0.01 70 / 0.2);background:transparent;font-family:'Jost',sans-serif;font-size:10.5px;letter-spacing:0.16em;color:oklch(0.45 0.01 70);cursor:pointer;">ABANDON TAKE — NOTHING FILED</button>
+        </sc-if>
+
+        <sc-if value="{{ isProc }}">
+          <div style="font-family:'Space Mono',monospace;font-size:11.5px;letter-spacing:0.04em;color:oklch(0.48 0.01 70);line-height:2;">
+            <div>· matching against 38 pages</div>
+            <div>· nearest&nbsp;&nbsp;[[attention-essay]]&nbsp;0.89</div>
+            <div>· action&nbsp;&nbsp;&nbsp;append + //research</div>
+          </div>
+          <button onClick="{{ onBackground }}" style="width:100%;margin-top:14px;padding:13px;border:1px solid oklch(0.2 0.01 70 / 0.2);background:transparent;font-family:'Jost',sans-serif;font-size:10.5px;letter-spacing:0.16em;color:oklch(0.45 0.01 70);cursor:pointer;">FILE IN BACKGROUND</button>
+        </sc-if>
+
+        <sc-if value="{{ isType }}">
+          <textarea value="{{ text }}" onChange="{{ onText }}" placeholder="type your dump…" style="width:100%;height:180px;border:1px solid oklch(0.2 0.01 70 / 0.25);background:oklch(0.97 0.008 85);padding:16px;font-family:'Bodoni Moda',serif;font-size:17px;line-height:1.55;color:oklch(0.2 0.01 70);resize:none;outline:none;"></textarea>
+          <div style="display:flex;gap:10px;margin-top:14px;">
+            <button onClick="{{ onToType }}" style="padding:15px 18px;border:1px solid oklch(0.2 0.01 70 / 0.3);background:transparent;font-family:'Jost',sans-serif;font-size:11px;letter-spacing:0.16em;color:oklch(0.35 0.01 70);cursor:pointer;">CANCEL</button>
+            <button onClick="{{ onSubmit }}" style="flex:1;padding:15px;border:none;background:oklch(0.2 0.01 70);color:oklch(0.95 0.012 85);font-family:'Jost',sans-serif;font-size:11px;letter-spacing:0.2em;cursor:pointer;">FILE IT</button>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isRouted }}">
+          <div style="border:1px solid oklch(0.2 0.01 70 / 0.2);padding:18px;">
+            <div style="font-family:'Jost',sans-serif;font-size:10px;letter-spacing:0.28em;text-transform:uppercase;color:oklch(0.55 0.01 70);">Filed to</div>
+            <button onClick="{{ onToggleRedirect }}" style="width:100%;display:flex;align-items:center;gap:11px;margin-top:6px;padding:6px 0;background:none;border:none;cursor:pointer;color:oklch(0.2 0.01 70);text-align:left;">
+              <span style="width:15px;height:15px;background:{{ filedColor }};flex:0 0 auto;"></span>
+              <span style="font-family:'Bodoni Moda',serif;font-size:23px;">{{ filedName }}</span>
+              <span style="margin-left:auto;font-family:'Jost',sans-serif;font-size:10px;letter-spacing:0.18em;color:oklch(0.5 0.01 70);text-decoration:underline;text-underline-offset:3px;">CHANGE</span>
+            </button>
+            <sc-if value="{{ routedRedirecting }}">
+              <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+                <sc-for list="{{ filedChoices }}" as="ch" hint-placeholder-count="5">
+                  <button onClick="{{ ch.pick }}" style="display:flex;align-items:center;gap:8px;padding:11px 13px;border:1px solid oklch(0.2 0.01 70 / 0.25);background:transparent;cursor:pointer;font-family:'Bodoni Moda',serif;font-size:14.5px;color:oklch(0.25 0.01 70);" style-hover="background:oklch(0.2 0.01 70 / 0.06);"><span style="width:10px;height:10px;background:{{ ch.color }};"></span>{{ ch.name }}</button>
+                </sc-for>
+              </div>
+            </sc-if>
+            <div style="font-family:'Bodoni Moda',serif;font-style:italic;font-size:15px;line-height:1.55;color:oklch(0.42 0.01 70);margin-top:10px;">{{ filedExcerpt }}</div>
+            <div style="display:flex;align-items:center;gap:9px;margin-top:12px;">
+              <span style="width:8px;height:8px;border-radius:50%;background:oklch(0.6 0.16 25);flex:0 0 auto;"></span>
+              <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:oklch(0.48 0.01 70);">//research queued · find the Berger quote about seeing</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:15px;padding-top:12px;border-top:1px solid oklch(0.2 0.01 70 / 0.15);">
+              <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:oklch(0.5 0.01 70);">commit&nbsp;a3f9c1</span>
+              <button onClick="{{ onRevert }}" style="padding:10px 16px;border:none;background:none;font-family:'Space Mono',monospace;font-size:10.5px;color:oklch(0.5 0.01 70);cursor:pointer;text-decoration:underline;text-underline-offset:4px;">⤺ revert</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isIdle }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <button onClick="{{ onToType }}" style="width:100%;padding:15px;border:1px solid oklch(0.2 0.01 70 / 0.3);background:transparent;font-family:'Jost',sans-serif;font-size:11px;letter-spacing:0.2em;color:oklch(0.35 0.01 70);cursor:pointer;">TYPE INSTEAD</button>
+            <sc-if value="{{ showRecent }}" hint-placeholder-val="{{ true }}">
+              <div style="border-top:1px solid oklch(0.2 0.01 70 / 0.15);padding-top:13px;">
+                <div style="font-family:'Jost',sans-serif;font-size:9.5px;letter-spacing:0.28em;text-transform:uppercase;color:oklch(0.55 0.01 70);margin-bottom:8px;">Recently filed</div>
+                <sc-for list="{{ recent }}" as="r" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:12px;padding:7px 0;">
+                    <span style="width:10px;height:10px;flex:0 0 auto;background:{{ r.color }};"></span>
+                    <span style="flex:1;font-family:'Bodoni Moda',serif;font-size:15px;color:oklch(0.3 0.01 70);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">{{ r.snip }}</span>
+                    <span style="font-family:'Space Mono',monospace;font-size:9.5px;color:oklch(0.55 0.01 70);">{{ r.time }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ LEDGER ============ -->
+  <sc-if value="{{ isLedger }}">
+    <div data-screen-label="Ledger" style="flex:1;min-height:0;overflow-y:auto;padding:24px 28px 26px;">
+      <div style="font-family:'Bodoni Moda',serif;font-size:33px;font-weight:500;line-height:1.06;">The ledger.</div>
+      <div style="font-family:'Jost',sans-serif;font-size:12.5px;color:oklch(0.48 0.01 70);margin-top:7px;">Every act of the agent, committed. Nothing is lost.</div>
+      <sc-for list="{{ ledger }}" as="day" hint-placeholder-count="2">
+        <div style="margin-top:26px;">
+          <div style="font-family:'Jost',sans-serif;font-size:9.5px;letter-spacing:0.3em;text-transform:uppercase;color:oklch(0.55 0.01 70);padding-bottom:8px;border-bottom:1px solid oklch(0.2 0.01 70 / 0.15);">{{ day.day }}</div>
+          <sc-for list="{{ day.items }}" as="e" hint-placeholder-count="2">
+            <div onClick="{{ e.toggle }}" style="display:flex;gap:13px;padding:13px 0;border-bottom:1px solid oklch(0.2 0.01 70 / 0.08);cursor:pointer;opacity:{{ e.dim }};">
+              <span style="width:11px;height:11px;flex:0 0 auto;margin-top:4px;background:{{ e.color }};"></span>
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:baseline;gap:10px;">
+                  <span style="font-family:'Jost',sans-serif;font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:oklch(0.42 0.01 70);">{{ e.verb }}</span>
+                  <span style="font-family:'Space Mono',monospace;font-size:9px;color:oklch(0.58 0.01 70);margin-left:auto;">{{ e.time }}</span>
+                </div>
+                <div style="font-family:'Bodoni Moda',serif;font-size:15.5px;line-height:1.45;color:oklch(0.28 0.01 70);margin-top:4px;">{{ e.text }}</div>
+                <div style="font-family:'Space Mono',monospace;font-size:9.5px;color:oklch(0.52 0.01 70);margin-top:5px;">{{ e.meta }}</div>
+                <sc-if value="{{ e.isOpen }}">
+                  <div style="margin-top:10px;background:oklch(0.92 0.012 85);padding:12px 14px;">
+                    <sc-for list="{{ e.detail }}" as="d" hint-placeholder-count="2">
+                      <div style="font-family:'Space Mono',monospace;font-size:10px;line-height:1.9;color:oklch(0.38 0.01 70);">{{ d }}</div>
+                    </sc-for>
+                    <button onClick="{{ e.revert }}" style="margin-top:10px;padding:11px 14px;border:1px solid oklch(0.2 0.01 70 / 0.3);background:transparent;font-family:'Space Mono',monospace;font-size:10px;color:oklch(0.35 0.01 70);cursor:pointer;">⤺ revert this commit</button>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <!-- ============ CODE ============ -->
+  <sc-if value="{{ isCode }}">
+    <div data-screen-label="Code" style="flex:1;min-height:0;overflow-y:auto;padding:24px 28px 26px;">
+      <div style="font-family:'Bodoni Moda',serif;font-size:33px;font-weight:500;line-height:1.06;">The code.</div>
+      <div style="font-family:'Jost',sans-serif;font-size:12.5px;color:oklch(0.48 0.01 70);margin-top:7px;">Colour is the filing system. You never choose a folder again.</div>
+
+      <sc-if value="{{ hasUncoded }}">
+        <div style="margin-top:22px;border:1px dashed oklch(0.2 0.01 70 / 0.4);padding:16px;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span style="width:20px;height:20px;flex:0 0 auto;border:1px dashed oklch(0.2 0.01 70 / 0.5);"></span>
+            <span style="font-family:'Bodoni Moda',serif;font-size:19px;">{{ uncodedName }}</span>
+          </div>
+          <div style="font-family:'Jost',sans-serif;font-size:12px;color:oklch(0.48 0.01 70);margin-top:8px;">{{ uncodedNote }}</div>
+          <div style="display:flex;gap:9px;margin-top:13px;">
+            <sc-for list="{{ uncodedPalette }}" as="p" hint-placeholder-count="6">
+              <button onClick="{{ p.pick }}" style="width:44px;height:44px;border:1px solid oklch(0.2 0.01 70 / 0.2);background:{{ p.color }};cursor:pointer;opacity:{{ p.opacity }};padding:0;"></button>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <div style="margin-top:20px;">
+        <sc-for list="{{ topics }}" as="t" hint-placeholder-count="6">
+          <div style="border-bottom:1px solid oklch(0.2 0.01 70 / 0.1);">
+            <button onClick="{{ t.toggle }}" style="width:100%;display:flex;align-items:center;gap:13px;padding:14px 0;background:none;border:none;cursor:pointer;text-align:left;color:oklch(0.2 0.01 70);">
+              <span style="width:20px;height:20px;flex:0 0 auto;background:{{ t.color }};"></span>
+              <span style="font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:0.1em;color:oklch(0.52 0.01 70);width:22px;">{{ t.tag }}</span>
+              <span style="flex:1;font-family:'Bodoni Moda',serif;font-size:19px;">{{ t.name }}</span>
+              <span style="font-family:'Space Mono',monospace;font-size:9.5px;color:oklch(0.52 0.01 70);">{{ t.pages }}&nbsp;pp&nbsp;·&nbsp;{{ t.last }}</span>
+            </button>
+            <sc-if value="{{ t.isOpen }}">
+              <div style="padding:2px 0 16px 33px;">
+                <div style="font-family:'Jost',sans-serif;font-size:10px;letter-spacing:0.24em;text-transform:uppercase;color:oklch(0.55 0.01 70);margin-bottom:10px;">Recode</div>
+                <div style="display:flex;gap:9px;">
+                  <sc-for list="{{ t.palette }}" as="p" hint-placeholder-count="6">
+                    <button onClick="{{ p.pick }}" style="width:44px;height:44px;border:1px solid oklch(0.2 0.01 70 / 0.2);background:{{ p.color }};cursor:pointer;opacity:{{ p.opacity }};padding:0;"></button>
+                  </sc-for>
+                </div>
+                <div style="font-family:'Space Mono',monospace;font-size:9.5px;color:oklch(0.52 0.01 70);margin-top:11px;">{{ t.note }}</div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ QUEUE ============ -->
+  <sc-if value="{{ isQueue }}">
+    <div data-screen-label="Queue" style="flex:1;min-height:0;overflow-y:auto;padding:24px 28px 26px;">
+      <div style="font-family:'Bodoni Moda',serif;font-size:33px;font-weight:500;line-height:1.06;">Awaiting judgement.</div>
+      <div style="font-family:'Jost',sans-serif;font-size:12.5px;color:oklch(0.48 0.01 70);margin-top:7px;">Dumps the agent would not file alone. Rule on them.</div>
+
+      <sc-if value="{{ queueEmpty }}">
+        <div style="margin-top:60px;text-align:center;">
+          <div style="font-family:'Bodoni Moda',serif;font-style:italic;font-size:19px;color:oklch(0.45 0.01 70);">Nothing awaits judgement.</div>
+          <div style="font-family:'Space Mono',monospace;font-size:10px;color:oklch(0.55 0.01 70);margin-top:9px;">the agent files on · confidence ≥ 0.75</div>
+        </div>
+      </sc-if>
+
+      <sc-for list="{{ queue }}" as="q" hint-placeholder-count="2">
+        <div style="margin-top:20px;border:1px solid oklch(0.2 0.01 70 / 0.2);padding:17px;">
+          <sc-if value="{{ q.isDone }}">
+            <div style="display:flex;align-items:center;gap:11px;">
+              <span style="width:11px;height:11px;flex:0 0 auto;background:{{ q.doneColor }};"></span>
+              <span style="font-family:'Jost',sans-serif;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;color:oklch(0.42 0.01 70);">{{ q.doneLabel }}</span>
+              <span style="font-family:'Space Mono',monospace;font-size:9.5px;color:oklch(0.55 0.01 70);margin-left:auto;">{{ q.doneMeta }}</span>
+              <button onClick="{{ q.undo }}" style="padding:8px 10px;border:none;background:none;font-family:'Jost',sans-serif;font-size:10px;letter-spacing:0.16em;color:oklch(0.45 0.01 70);cursor:pointer;text-decoration:underline;text-underline-offset:3px;">UNDO</button>
+            </div>
+          </sc-if>
+          <sc-if value="{{ q.isPending }}">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;">
+              <span style="font-family:'Space Mono',monospace;font-size:22px;color:oklch(0.35 0.01 70);">{{ q.confPct }}</span>
+              <span style="font-family:'Jost',sans-serif;font-size:9.5px;letter-spacing:0.26em;text-transform:uppercase;color:oklch(0.55 0.01 70);">certain — files alone at 75%</span>
+            </div>
+            <div style="font-family:'Bodoni Moda',serif;font-style:italic;font-size:15.5px;line-height:1.55;color:oklch(0.32 0.01 70);margin-top:10px;">“{{ q.text }}”</div>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:13px;">
+              <span style="font-family:'Jost',sans-serif;font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:oklch(0.55 0.01 70);">guess</span>
+              <span style="width:11px;height:11px;flex:0 0 auto;background:{{ q.guessColor }};"></span>
+              <span style="font-family:'Bodoni Moda',serif;font-size:16px;">{{ q.guessName }}</span>
+            </div>
+            <sc-if value="{{ q.isRedirecting }}">
+              <div style="margin-top:14px;padding-top:12px;border-top:1px solid oklch(0.2 0.01 70 / 0.12);">
+                <div style="font-family:'Jost',sans-serif;font-size:10px;letter-spacing:0.24em;text-transform:uppercase;color:oklch(0.55 0.01 70);margin-bottom:9px;">File instead to</div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                  <sc-for list="{{ q.choices }}" as="ch" hint-placeholder-count="4">
+                    <button onClick="{{ ch.pick }}" style="display:flex;align-items:center;gap:8px;padding:11px 13px;border:1px solid oklch(0.2 0.01 70 / 0.25);background:transparent;cursor:pointer;font-family:'Bodoni Moda',serif;font-size:14.5px;color:oklch(0.25 0.01 70);" style-hover="background:oklch(0.2 0.01 70 / 0.06);"><span style="width:10px;height:10px;background:{{ ch.color }};"></span>{{ ch.name }}</button>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ q.notRedirecting }}">
+              <div style="display:flex;gap:8px;margin-top:15px;">
+                <button onClick="{{ q.approve }}" style="flex:1;padding:13px 8px;border:none;background:oklch(0.2 0.01 70);color:oklch(0.95 0.012 85);font-family:'Jost',sans-serif;font-size:10.5px;letter-spacing:0.14em;cursor:pointer;">FILE AS GUESSED</button>
+                <button onClick="{{ q.redirect }}" style="padding:13px 14px;border:1px solid oklch(0.2 0.01 70 / 0.3);background:transparent;font-family:'Jost',sans-serif;font-size:10.5px;letter-spacing:0.14em;color:oklch(0.35 0.01 70);cursor:pointer;">REDIRECT</button>
+                <button onClick="{{ q.discard }}" style="padding:13px 14px;border:none;background:none;font-family:'Jost',sans-serif;font-size:10.5px;letter-spacing:0.14em;color:oklch(0.5 0.01 70);cursor:pointer;text-decoration:underline;text-underline-offset:3px;">DISCARD</button>
+              </div>
+            </sc-if>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <!-- ============ NAV ============ -->
+  <div style="flex:0 0 auto;display:flex;border-top:1px solid oklch(0.2 0.01 70 / 0.15);background:oklch(0.95 0.012 85);">
+    <button onClick="{{ goCapture }}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;padding:15px 0 17px;background:none;border:none;cursor:pointer;position:relative;">
+      <span style="height:2px;width:26px;background:{{ indCapture }};"></span>
+      <span style="font-family:'Jost',sans-serif;font-size:11px;letter-spacing:0.2em;color:oklch(0.35 0.01 70);">CAPTURE</span>
+      <sc-if value="{{ isRec }}"><span style="position:absolute;top:5px;left:50%;margin-left:30px;display:flex;align-items:center;gap:4px;"><span style="width:6px;height:6px;border-radius:50%;background:oklch(0.55 0.15 300);animation:cerpulse 1.2s ease-in-out infinite;"></span><span style="font-family:'Space Mono',monospace;font-size:9px;color:oklch(0.55 0.15 300);">{{ timer }}</span></span></sc-if>
+    </button>
+    <button onClick="{{ goLedger }}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;padding:15px 0 17px;background:none;border:none;cursor:pointer;">
+      <span style="height:2px;width:26px;background:{{ indLedger }};"></span>
+      <span style="font-family:'Jost',sans-serif;font-size:11px;letter-spacing:0.2em;color:oklch(0.35 0.01 70);">LEDGER</span>
+    </button>
+    <button onClick="{{ goCode }}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;padding:15px 0 17px;background:none;border:none;cursor:pointer;">
+      <span style="height:2px;width:26px;background:{{ indCode }};"></span>
+      <span style="font-family:'Jost',sans-serif;font-size:11px;letter-spacing:0.2em;color:oklch(0.35 0.01 70);">CODE</span>
+    </button>
+    <button onClick="{{ goQueue }}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;padding:15px 0 17px;background:none;border:none;cursor:pointer;position:relative;">
+      <span style="height:2px;width:26px;background:{{ indQueue }};"></span>
+      <span style="font-family:'Jost',sans-serif;font-size:11px;letter-spacing:0.2em;color:oklch(0.35 0.01 70);">QUEUE</span>
+      <sc-if value="{{ queueBadge }}"><span style="position:absolute;top:11px;right:50%;margin-right:-40px;font-family:'Space Mono',monospace;font-size:9px;color:oklch(0.97 0.02 25);background:oklch(0.6 0.16 25);width:15px;height:15px;display:flex;align-items:center;justify-content:center;">{{ queueCount }}</span></sc-if>
+    </button>
+  </div>
+
+  <!-- ============ TOAST ============ -->
+  <sc-if value="{{ toastShown }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;left:20px;right:20px;bottom:82px;background:oklch(0.2 0.01 70);color:oklch(0.95 0.012 85);display:flex;align-items:center;gap:12px;padding:14px 16px;z-index:5;box-shadow:0 10px 30px -10px oklch(0.2 0.01 70 / 0.5);">
+      <span style="flex:1;font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:0.04em;">{{ toastMsg }}</span>
+      <sc-if value="{{ toastHasAction }}"><button onClick="{{ toastAct }}" style="padding:9px 13px;border:1px solid oklch(0.95 0.012 85 / 0.5);background:transparent;color:oklch(0.95 0.012 85);font-family:'Jost',sans-serif;font-size:10px;letter-spacing:0.18em;cursor:pointer;">UNDO</button></sc-if>
+    </div>
+  </sc-if>
+
+  <!-- ============ ONBOARDING OVERLAY ============ -->
+  <sc-if value="{{ obShown }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Onboarding" style="position:absolute;inset:0;background:oklch(0.95 0.012 85);display:flex;flex-direction:column;z-index:10;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 24px;">
+        <span style="width:36px;flex:0 0 auto;"></span>
+        <div style="display:flex;gap:6px;">
+          <span style="width:8px;height:8px;background:{{ obDot1 }};"></span>
+          <span style="width:8px;height:8px;background:{{ obDot2 }};"></span>
+          <span style="width:8px;height:8px;background:{{ obDot3 }};"></span>
+        </div>
+      </div>
+
+      <sc-if value="{{ obStep1 }}">
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 34px;">
+          <div style="font-family:'Jost',sans-serif;font-size:10.5px;letter-spacing:0.34em;text-transform:uppercase;color:oklch(0.55 0.01 70);">Ceremony</div>
+          <div style="font-family:'Bodoni Moda',serif;font-size:42px;font-weight:500;line-height:1.05;margin-top:14px;">A notebook that keeps itself.</div>
+          <div style="font-family:'Jost',sans-serif;font-size:14.5px;line-height:1.65;color:oklch(0.42 0.01 70);margin-top:18px;">You speak. An agent transcribes, files, links, and reweaves — plain markdown in a vault you own. Reading stays in Obsidian. This is the instrument of capture.</div>
+          <div style="margin-top:28px;border:1px solid oklch(0.2 0.01 70 / 0.25);padding:15px 16px;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-family:'Space Mono',monospace;font-size:12px;color:oklch(0.3 0.01 70);">~/notes</span>
+            <span style="font-family:'Space Mono',monospace;font-size:10px;color:oklch(0.52 0.01 70);">38 pages · git</span>
+          </div>
+        </div>
+        <div style="padding:0 34px 40px;">
+          <button onClick="{{ obNext1 }}" style="width:100%;padding:17px;border:none;background:oklch(0.2 0.01 70);color:oklch(0.95 0.012 85);font-family:'Jost',sans-serif;font-size:12px;letter-spacing:0.24em;cursor:pointer;">THIS IS MY VAULT</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ obStep2 }}">
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 34px;">
+          <div style="font-family:'Bodoni Moda',serif;font-size:42px;font-weight:500;line-height:1.05;">It listens.</div>
+          <div style="font-family:'Jost',sans-serif;font-size:14.5px;line-height:1.65;color:oklch(0.42 0.01 70);margin-top:18px;">The ritual is spoken. Grant the microphone and your voice becomes the pipe. Without it, you may still type.</div>
+          <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:oklch(0.52 0.01 70);margin-top:16px;">{{ obMicNote }}</div>
+        </div>
+        <div style="padding:0 34px 40px;display:flex;flex-direction:column;gap:14px;">
+          <button onClick="{{ obGrant }}" style="width:100%;padding:17px;border:none;background:oklch(0.55 0.15 300);color:oklch(0.97 0.02 300);font-family:'Jost',sans-serif;font-size:12px;letter-spacing:0.24em;cursor:pointer;">GRANT THE MICROPHONE</button>
+          <button onClick="{{ obSkip2 }}" style="align-self:center;background:none;border:none;font-family:'Jost',sans-serif;font-size:11px;letter-spacing:0.18em;color:oklch(0.5 0.01 70);cursor:pointer;text-decoration:underline;text-underline-offset:4px;padding:8px;">I WILL TYPE</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ obStep3 }}">
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 34px;">
+          <div style="font-family:'Bodoni Moda',serif;font-size:42px;font-weight:500;line-height:1.05;">The code.</div>
+          <div style="font-family:'Jost',sans-serif;font-size:14.5px;line-height:1.65;color:oklch(0.42 0.01 70);margin-top:18px;">Every topic is assigned a colour. Colour is the filing system — you never choose a folder again. The agent keeps the code; you may recode at will.</div>
+          <div style="display:flex;flex-direction:column;gap:9px;margin-top:26px;">
+            <sc-for list="{{ obCodes }}" as="c" hint-placeholder-count="6">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <span style="width:34px;height:13px;flex:0 0 auto;background:{{ c.color }};"></span>
+                <span style="font-family:'Space Mono',monospace;font-size:10px;letter-spacing:0.1em;color:oklch(0.45 0.01 70);">{{ c.tag }}</span>
+                <span style="font-family:'Bodoni Moda',serif;font-size:15px;color:oklch(0.28 0.01 70);">{{ c.topic }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="padding:0 34px 40px;">
+          <button onClick="{{ obEnter }}" style="width:100%;padding:17px;border:none;background:oklch(0.2 0.01 70);color:oklch(0.95 0.012 85);font-family:'Jost',sans-serif;font-size:12px;letter-spacing:0.24em;cursor:pointer;">BEGIN THE CEREMONY</button>
+        </div>
+      </sc-if>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;$preview&quot;: { &quot;width&quot;: 390, &quot;height&quot;: 844 },
+  &quot;replayOnboarding&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Display&quot; },
+  &quot;showRecent&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Display&quot; },
+  &quot;motionCalm&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Motion&quot; },
+  &quot;soundCues&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Capture&quot; },
+  &quot;forceSimulated&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Capture&quot; }
+}">
+class Component extends DCLogic {
+  words = ("Okay — the essay about attention keeps pulling at me. The argument isn't that phones are bad, it's that we outsourced the ritual of noticing. It could sit next to the walking notes from Sunday. Maybe it's a chapter, not an essay. Note to self: find that Berger line about seeing coming before words. //research").split(' ');
+
+  bone = 'oklch(0.95 0.012 85)';
+  ink = 'oklch(0.2 0.01 70)';
+  violet = 'oklch(0.55 0.15 300)';
+  wheelColors = ['oklch(0.55 0.15 300)','oklch(0.63 0.12 150)','oklch(0.62 0.10 225)','oklch(0.71 0.13 55)','oklch(0.60 0.16 25)','oklch(0.70 0.02 260)'];
+
+  state = {
+    screen: 'capture',
+    ob: (typeof localStorage !== 'undefined' && localStorage.getItem('ceremony_onboarded_v1')) ? 0 : 1,
+    micGranted: false,
+    // capture
+    phase:'idle', elapsed:0, procT:0, text:'', revealed:0, level:0.35, target:0.5, angle:0, active:0, liveText:'', usedLive:false,
+    redirectOpen:false, filedToId:'st', openEntry:null, reverted:[], toastMsg:'', toastHasAction:false, toastLeft:0,
+    // code screen
+    openTopic: null,
+    topics: [
+      { id:'wk', tag:'WK', name:'work',    color:'oklch(0.55 0.15 300)', pages:12, last:'Mon',  note:'12 pages · rewoven nightly · 31 inbound links' },
+      { id:'st', tag:'ST', name:'studio',  color:'oklch(0.63 0.12 150)', pages:8,  last:'23:15',note:'8 pages · essays, drafts, fragments · rewoven nightly' },
+      { id:'id', tag:'ID', name:'ideas',   color:'oklch(0.62 0.10 225)', pages:7,  last:'Sun',  note:'7 pages · unclaimed sparks · rewoven nightly' },
+      { id:'pe', tag:'PE', name:'people',  color:'oklch(0.71 0.13 55)',  pages:6,  last:'Mon',  note:'6 pages · one page per person who matters' },
+      { id:'jn', tag:'JN', name:'journal', color:'oklch(0.60 0.16 25)',  pages:4,  last:'21:02',note:'4 pages · private · never rewoven' },
+      { id:'in', tag:'IN', name:'inbox',   color:'oklch(0.70 0.02 260)', pages:1,  last:'—',    note:'1 page · the waiting room' },
+    ],
+    uncodedColor: null,
+    // queue
+    queue: [
+      { id:1, conf:'0.54', text:'…the thing about morning pages — maybe it belongs in the studio, or maybe it\u2019s journal, it\u2019s a practice more than a project…', guess:'st', status:'pending' },
+      { id:2, conf:'0.61', text:'call Ana back about the cabin weekend — and her point about doing nothing on purpose deserves its own note', guess:'pe', status:'pending' },
+    ],
+  };
+
+  componentDidMount() {
+    this.iv = setInterval(() => this.tick(), 50);
+    if (this.props.replayOnboarding && this.state.ob === 0) this.setState({ ob:1 });
+  }
+  componentDidUpdate(prevProps) {
+    if (this.props.replayOnboarding && !prevProps.replayOnboarding && this.state.ob === 0) this.setState({ ob:1 });
+  }
+  componentWillUnmount() { clearInterval(this.iv); clearTimeout(this.bgTimer); this.stopMic(); }
+
+  // ---------- feedback ----------
+  sfx(name) {
+    if (this.props.soundCues === false) return;
+    try {
+      this.sctx = this.sctx || new (window.AudioContext || window.webkitAudioContext)();
+      const seq = { begin:[523.25, 783.99], end:[783.99, 523.25], filed:[659.25, 987.77] }[name] || [];
+      const t = this.sctx.currentTime;
+      seq.forEach((f, i) => {
+        const o = this.sctx.createOscillator(), g = this.sctx.createGain();
+        o.type = 'sine'; o.frequency.value = f; o.connect(g); g.connect(this.sctx.destination);
+        g.gain.setValueAtTime(0.0001, t + i * 0.09);
+        g.gain.exponentialRampToValueAtTime(0.06, t + i * 0.09 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.09 + 0.12);
+        o.start(t + i * 0.09); o.stop(t + i * 0.09 + 0.14);
+      });
+    } catch (e) {}
+  }
+  vibe() { try { navigator.vibrate && navigator.vibrate(12); } catch (e) {} }
+  showToast(msg, action, secs) { this.toastAction = action || null; this.setState({ toastMsg: msg, toastHasAction: !!action, toastLeft: secs || 3.5 }); }
+
+  // ---------- mic ----------
+  async startMic() {
+    if (this.props.forceSimulated) return false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.stream = stream;
+      this.actx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = this.actx.createMediaStreamSource(stream);
+      this.analyser = this.actx.createAnalyser();
+      this.analyser.fftSize = 512;
+      src.connect(this.analyser);
+      this.buf = new Uint8Array(this.analyser.fftSize);
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SR) {
+        this.sr = new SR();
+        this.sr.continuous = true;
+        this.sr.interimResults = true;
+        this.sr.onresult = (ev) => {
+          let fin = '', interim = '';
+          for (let i = 0; i < ev.results.length; i++) {
+            const r = ev.results[i];
+            if (r.isFinal) fin += r[0].transcript + ' '; else interim += r[0].transcript;
+          }
+          this.setState({ liveText: (fin + interim).trim() });
+        };
+        try { this.sr.start(); } catch (e) {}
+      }
+      return true;
+    } catch (e) { return false; }
+  }
+
+  stopMic() {
+    if (this.sr) { try { this.sr.stop(); } catch (e) {} this.sr = null; }
+    if (this.stream) { this.stream.getTracks().forEach(t => t.stop()); this.stream = null; }
+    if (this.actx) { try { this.actx.close(); } catch (e) {} this.actx = null; }
+    this.analyser = null;
+  }
+
+  micLevel() {
+    if (!this.analyser) return null;
+    this.analyser.getByteTimeDomainData(this.buf);
+    let sum = 0;
+    for (let i = 0; i < this.buf.length; i++) { const v = (this.buf[i] - 128) / 128; sum += v * v; }
+    return Math.min(1, Math.sqrt(sum / this.buf.length) * 4);
+  }
+
+  // ---------- tick ----------
+  tick() {
+    const calm = this.props.motionCalm;
+    let justRouted = false;
+    this.setState(s => {
+      let patch = null;
+      if (s.phase === 'rec') {
+        const elapsed = s.elapsed + 0.05;
+        let target = s.target;
+        if (s.usedLive) {
+          const m = this.micLevel();
+          if (m !== null) target = 0.12 + m * 0.88;
+        } else if (Math.random() < (calm ? 0.04 : 0.08)) {
+          target = 0.15 + Math.random() * 0.85;
+        }
+        const level = s.level + (target - s.level) * (calm ? 0.05 : 0.09);
+        patch = {
+          elapsed, level, target,
+          revealed: Math.min(this.words.length, Math.floor(elapsed / 0.30)),
+          angle: s.angle + (calm ? 0.35 : 0.8),
+          active: Math.min(5, Math.floor(level * 6)),
+        };
+      } else if (s.phase === 'proc') {
+        const procT = s.procT + 0.05;
+        if (procT > 1.6) { patch = { phase:'routed', procT, redirectOpen:false }; justRouted = true; }
+        else patch = { procT };
+      }
+      if (s.toastLeft > 0) {
+        patch = patch || {};
+        const left = Math.max(0, s.toastLeft - 0.05);
+        patch.toastLeft = left;
+        if (left === 0) { patch.toastMsg = ''; patch.toastHasAction = false; }
+      }
+      return patch;
+    });
+    if (justRouted) {
+      this.sfx('filed'); this.vibe();
+      this.showToast('committed a3f9c1', () => {
+        this.setState({ phase:'idle', elapsed:0, text:'', liveText:'', redirectOpen:false, toastMsg:'', toastHasAction:false, toastLeft:0 });
+      }, 4);
+    }
+  }
+
+  // ---------- wheel ----------
+  buildWheel() {
+    const o = this.state, h = React.createElement, cx = 160, cy = 160, R = 128, r = 62;
+    const pol = (ang, rad) => [cx + rad * Math.cos((ang - 90) * Math.PI / 180), cy + rad * Math.sin((ang - 90) * Math.PI / 180)];
+    const seg = (a0, a1) => {
+      const [x0,y0] = pol(a0,R), [x1,y1] = pol(a1,R), [x2,y2] = pol(a1,r), [x3,y3] = pol(a0,r);
+      return `M${x0} ${y0} A${R} ${R} 0 0 1 ${x1} ${y1} L${x2} ${y2} A${r} ${r} 0 0 0 ${x3} ${y3} Z`;
+    };
+    const rec = o.phase === 'rec', routed = o.phase === 'routed';
+    const cols = this.state.topics.map(t => t.color);
+    const step = 360 / cols.length;
+    const fi = Math.max(0, this.state.topics.findIndex(t => t.id === o.filedToId));
+    const segs = cols.map((col, i) => {
+      const a0 = i * step;
+      let op = 0.34;
+      if (rec) op = (i === (o.active % cols.length) ? 1 : 0.22);
+      else if (routed) op = (i === fi ? 1 : 0.12);
+      return h('path', { key:i, d:seg(a0, a0 + step), fill:col, opacity:op, stroke:this.bone, strokeWidth:2, style:{ transition:'opacity .6s ease' } });
+    });
+    const grp = h('g', { transform: rec ? `rotate(${o.angle} ${cx} ${cy})` : '' }, segs);
+    const ring = h('circle', { cx, cy, r:R + 9, fill:'none', stroke:this.ink, strokeWidth:1, opacity:0.5 });
+    const ticks = [];
+    for (let i = 0; i < 24; i++) {
+      const a = i * 15, [x0,y0] = pol(a, R + 9), [x1,y1] = pol(a, R + (i % 2 ? 14 : 18));
+      ticks.push(h('line', { key:'t'+i, x1:x0, y1:y0, x2:x1, y2:y1, stroke:this.ink, strokeWidth:1, opacity:0.4 }));
+    }
+    const outer = h('g', { transform: rec ? `rotate(${-o.angle * 0.5} ${cx} ${cy})` : '' }, ring, ...ticks);
+    let ptr = null;
+    if (routed) { const [px,py] = pol(fi * step + step / 2, R + 24); ptr = h('circle', { cx:px, cy:py, r:4, fill:cols[fi] }); }
+    return h('svg', { viewBox:'0 0 320 320', width:'100%', height:'100%', style:{ display:'block' } }, outer, grp, ptr);
+  }
+
+  fmt(sec) { const m = Math.floor(sec / 60), ss = Math.floor(sec % 60); return m + ':' + String(ss).padStart(2, '0'); }
+
+  topicById(id) { return this.state.topics.find(t => t.id === id); }
+
+  // ---------- data ----------
+  ledgerData() {
+    const c = (id) => this.topicById(id).color;
+    return [
+      { day:'Today', items:[
+        { id:'b12e77', color:c('st'), verb:'//research answered', time:'23:15', text:'Berger — “seeing comes before words.” Ways of Seeing, opening line.', meta:'b12e77 · appended to [[attention-essay]]', detail:['+ 2 lines → studio/attention-essay.md','source: web · Ways of Seeing (1972)'] },
+        { id:'a3f9c1', color:c('st'), verb:'filed', time:'23:14', text:'Attention essay — we outsourced the ritual of noticing. Chapter, not essay.', meta:'a3f9c1 · + //research queued', detail:['+ 6 lines → studio/attention-essay.md','+ //research: find the Berger line','linked ← [[walking-notes]]'] },
+        { id:'8d20aa', color:c('jn'), verb:'filed', time:'21:02', text:'Long day; the reading went well. Note the pattern: energy follows making.', meta:'8d20aa · [[journal/2026-07]]', detail:['+ 4 lines → journal/2026-07.md','private · excluded from reweave'] },
+      ]},
+      { day:'Yesterday', items:[
+        { id:'9c41d0', color:c('st'), verb:'rewove', time:'22:40', text:'Split [[studio]] → [[studio]] + [[poems]].', meta:'9c41d0 · 14 links updated · awaiting colour', detail:['studio.md → studio.md + poems.md','14 links updated across 9 pages'] },
+        { id:'77aa02', color:c('pe'), verb:'filed', time:'09:17', text:'Mum\u2019s birthday — book the corner table at Luca\u2019s, she liked the window.', meta:'77aa02 · [[people/mum]]', detail:['+ 3 lines → people/mum.md','reminder noted · July 12'] },
+      ]},
+      { day:'Sunday', items:[
+        { id:'c9f3b4', color:c('id'), verb:'merged', time:'18:03', text:'Three duplicate notes on slow productivity → one page.', meta:'c9f3b4 · [[ideas]]', detail:['slow-1.md + slow-2.md + slow-3.md','→ ideas/slow-productivity.md'] },
+        { id:'41e0d9', color:c('id'), verb:'coded', time:'17:58', text:'New topic [[ideas]] entered the code — assigned cyan.', meta:'41e0d9', detail:['+ ideas.md · colour assigned','7 orphan notes adopted'] },
+      ]},
+    ];
+  }
+
+  renderVals() {
+    const s = this.state, p = s.phase;
+    const pending = s.queue.filter(q => q.status === 'pending');
+    const palette = (current, pick) => this.wheelColors.map(col => ({ color: col, opacity: col === current ? 1 : 0.45, pick: () => pick(col) }));
+
+    const excerptSrc = s.usedLive && s.liveText ? s.liveText : (s.text || 'We outsourced the ritual of noticing — pair with Sunday\u2019s walking notes; a chapter, not an essay.');
+    const filedExcerpt = excerptSrc.length > 150 ? excerptSrc.slice(0, 150).trim() + '…' : excerptSrc;
+
+    const facMap = { capture:'FAC·2607·07', ledger:'FAC·2607·08', code:'FAC·2607·09', queue:'FAC·2607·10' };
+    const ind = (name) => s.screen === name ? this.ink : 'transparent';
+
+    return {
+      // shell
+      facNo: facMap[s.screen], clock: new Date().toTimeString().slice(0, 5),
+      isCapture: s.screen === 'capture', isLedger: s.screen === 'ledger', isCode: s.screen === 'code', isQueue: s.screen === 'queue',
+      goCapture: () => this.setState({ screen:'capture' }), goLedger: () => this.setState({ screen:'ledger' }),
+      goCode: () => this.setState({ screen:'code' }), goQueue: () => this.setState({ screen:'queue' }),
+      indCapture: ind('capture'), indLedger: ind('ledger'), indCode: ind('code'), indQueue: ind('queue'),
+      queueBadge: pending.length > 0, queueCount: pending.length,
+
+      // capture
+      isIdle: p === 'idle', isRec: p === 'rec', isProc: p === 'proc', isRouted: p === 'routed', isType: p === 'type',
+      vizShown: p !== 'type',
+      showRecent: this.props.showRecent ?? true,
+      timer: this.fmt(s.elapsed),
+      micMode: s.usedLive ? 'LIVE MIC' : 'SIMULATED',
+      transcript: s.usedLive ? s.liveText : this.words.slice(0, (p === 'proc' || p === 'routed') ? this.words.length : s.revealed).join(' '),
+      text: s.text,
+      filedExcerpt,
+      recent: [
+        { color:this.topicById('st').color, snip:'attention essay — chapter, not essay', time:'23:14' },
+        { color:this.topicById('pe').color, snip:'mum\u2019s birthday — the corner table at Luca\u2019s', time:'Mon' },
+        { color:this.topicById('id').color, snip:'slow productivity notes, merged', time:'Sun' },
+      ],
+      viz: this.buildWheel(),
+      onStart: async () => {
+        this.sfx('begin'); this.vibe();
+        this.setState({ phase:'rec', elapsed:0, revealed:0, level:0.42, angle:0, liveText:'', usedLive:false });
+        const ok = await this.startMic();
+        if (ok) this.setState({ usedLive:true });
+      },
+      onEnd: () => { this.sfx('end'); this.vibe(); this.stopMic(); this.setState({ phase:'proc', procT:0, revealed:this.words.length }); },
+      onAbandon: () => { this.stopMic(); this.vibe(); this.setState({ phase:'idle', elapsed:0, liveText:'' }); this.showToast('take abandoned — nothing filed'); },
+      onBackground: () => {
+        this.setState({ phase:'idle', elapsed:0, procT:0 });
+        this.showToast('filing in background…');
+        this.bgTimer = setTimeout(() => { this.sfx('filed'); this.showToast('filed to ' + this.topicById(this.state.filedToId).name + ' — see the ledger'); }, 1700);
+      },
+      onReset: () => this.setState({ phase:'idle', elapsed:0, text:'', liveText:'', redirectOpen:false, filedToId:'st' }),
+      onRevert: () => { this.setState({ phase:'idle', elapsed:0, text:'', liveText:'', redirectOpen:false }); this.showToast('commit a3f9c1 reverted'); },
+      filedName: this.topicById(s.filedToId).name,
+      filedColor: this.topicById(s.filedToId).color,
+      routedRedirecting: s.redirectOpen,
+      onToggleRedirect: () => this.setState({ redirectOpen: !s.redirectOpen }),
+      filedChoices: s.topics.filter(t => t.id !== s.filedToId).map(t => ({ name:t.name, color:t.color, pick: () => { this.setState({ filedToId:t.id, redirectOpen:false }); this.showToast('refiled to ' + t.name + ' · a3f9c1'); } })),
+      toastShown: !!s.toastMsg && s.toastLeft > 0,
+      toastMsg: s.toastMsg,
+      toastHasAction: s.toastHasAction,
+      toastAct: () => { if (this.toastAction) this.toastAction(); },
+      onToType: () => this.setState({ phase: p === 'type' ? 'idle' : 'type', text:'' }),
+      onText: (e) => this.setState({ text: e.target.value }),
+      onSubmit: () => { if ((s.text || '').trim()) this.setState({ phase:'proc', procT:0, usedLive:false }); },
+
+      // ledger
+      ledger: this.ledgerData().map(day => ({ day: day.day, items: day.items.map(e => {
+        const open = s.openEntry === e.id, rev = s.reverted.includes(e.id);
+        return { ...e,
+          verb: rev ? 'reverted' : e.verb,
+          dim: rev ? 0.4 : 1,
+          isOpen: open && !rev,
+          toggle: () => { if (!rev) this.setState({ openEntry: open ? null : e.id }); },
+          revert: (ev) => { ev.stopPropagation(); this.setState(st => ({ reverted:[...st.reverted, e.id], openEntry:null })); this.showToast('commit ' + e.id + ' reverted'); },
+        };
+      })})),
+
+      // code
+      hasUncoded: s.uncodedColor === null,
+      uncodedName: 'poems',
+      uncodedNote: 'Born of [[studio]] on Monday. The agent awaits its colour.',
+      uncodedPalette: palette(null, (col) => this.setState(st => ({
+        uncodedColor: col,
+        topics: [...st.topics, { id:'po', tag:'PO', name:'poems', color:col, pages:2, last:'Mon', note:'2 pages · born of [[studio]] · coded today' }],
+      }))),
+      topics: s.topics.map(t => ({
+        ...t,
+        isOpen: s.openTopic === t.id,
+        toggle: () => this.setState({ openTopic: s.openTopic === t.id ? null : t.id }),
+        palette: palette(t.color, (col) => this.setState(st => ({ topics: st.topics.map(x => x.id === t.id ? { ...x, color: col } : x) }))),
+      })),
+
+      // queue
+      queueEmpty: pending.length === 0 && s.queue.every(q => q.status !== 'pending'),
+      queue: s.queue.map(q => {
+        const g = this.topicById(q.guess);
+        const done = q.status !== 'pending' && q.status !== 'redirecting';
+        const setQ = (patch) => this.setState(st => ({ queue: st.queue.map(x => x.id === q.id ? { ...x, ...patch } : x) }));
+        let doneLabel = '', doneColor = 'transparent', doneMeta = '';
+        if (q.status === 'approved') { doneLabel = 'filed to ' + g.name; doneColor = g.color; doneMeta = 'committed'; }
+        if (q.status === 'discarded') { doneLabel = 'discarded'; doneColor = 'oklch(0.7 0.02 260)'; doneMeta = 'kept in git history'; }
+        if (typeof q.status === 'object') { doneLabel = 'redirected to ' + q.status.name; doneColor = q.status.color; doneMeta = 'committed'; }
+        return {
+          conf: q.conf, confPct: Math.round(parseFloat(q.conf) * 100) + '%', text: q.text,
+          guessName: g.name, guessColor: g.color,
+          isPending: q.status === 'pending' || q.status === 'redirecting',
+          isRedirecting: q.status === 'redirecting',
+          notRedirecting: q.status === 'pending',
+          isDone: done, doneLabel, doneColor, doneMeta,
+          approve: () => { setQ({ status:'approved' }); this.vibe(); },
+          discard: () => setQ({ status:'discarded' }),
+          redirect: () => setQ({ status:'redirecting' }),
+          undo: () => setQ({ status:'pending' }),
+          choices: s.topics.filter(t => t.id !== q.guess).map(t => ({ name:t.name, color:t.color, pick: () => setQ({ status:{ name:t.name, color:t.color } }) })),
+        };
+      }),
+
+      // onboarding
+      obShown: s.ob > 0,
+      obStep1: s.ob === 1, obStep2: s.ob === 2, obStep3: s.ob === 3,
+      obDot1: s.ob >= 1 ? this.ink : 'oklch(0.8 0.01 70)',
+      obDot2: s.ob >= 2 ? this.ink : 'oklch(0.8 0.01 70)',
+      obDot3: s.ob >= 3 ? this.ink : 'oklch(0.8 0.01 70)',
+      obMicNote: s.micGranted ? '✓ granted — the pipe is open' : 'nothing leaves the device before you end the take',
+      obCodes: s.topics.map(t => ({ color:t.color, tag:t.tag, topic:t.name })),
+      obNext1: () => this.setState({ ob:2 }),
+      obGrant: async () => {
+        let granted = false;
+        try { const st = await navigator.mediaDevices.getUserMedia({ audio:true }); st.getTracks().forEach(t => t.stop()); granted = true; } catch (e) {}
+        this.setState({ micGranted: granted, ob:3 });
+      },
+      obSkip2: () => this.setState({ ob:3 }),
+      obEnter: () => { try { localStorage.setItem('ceremony_onboarded_v1', '1'); } catch (e) {} this.setState({ ob:0 }); },
+    };
+  }
+}
+</script>
+</body>
+</html>
