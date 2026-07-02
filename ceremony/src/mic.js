@@ -23,9 +23,10 @@ export class MicSession {
   }
 
   async start() {
-    const heard = this.native ? await this._startNativeSR() : false
-    // level meter + audio recording — shared by both paths. On iOS the audio
-    // session may be owned by the recognizer; treat this as best-effort there.
+    // Native: Apple's recognizer owns the audio session outright — running
+    // getUserMedia beside it makes iOS kill both. No recorder, no analyser;
+    // the transcript comes from on-device SR and the level is synthesized.
+    if (this.native) return this._startNativeSR()
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       this.stream = stream
@@ -43,10 +44,10 @@ export class MicSession {
         this.rec.start(1000)
       }
 
-      if (!this.native) this._startWebSR()
+      this._startWebSR()
       return true
     } catch (e) {
-      return heard // native SR alone still counts as a live session
+      return false
     }
   }
 
@@ -70,9 +71,11 @@ export class MicSession {
 
   async _startNativeSR() {
     try {
+      // permissions first — this is what raises the iOS mic + speech prompts
+      const perm = await NativeSR.requestPermissions()
+      if (perm?.speechRecognition && perm.speechRecognition !== 'granted') return false
       const { available } = await NativeSR.available()
       if (!available) return false
-      await NativeSR.requestPermissions()
       await NativeSR.removeAllListeners()
       NativeSR.addListener('partialResults', (data) => {
         const t = data?.matches?.[0] || ''
@@ -86,6 +89,13 @@ export class MicSession {
   }
 
   level() {
+    if (this.native) {
+      // no analyser on native (the recognizer owns the session) — synthesize
+      // a gentle wander so the wheel still breathes with the take
+      this._synth = Math.min(0.9, Math.max(0.12,
+        (this._synth ?? 0.4) + (Math.random() - 0.5) * 0.16))
+      return this._synth
+    }
     if (!this.analyser) return null
     this.analyser.getByteTimeDomainData(this.buf)
     let sum = 0

@@ -65,15 +65,24 @@ export default function App() {
       .catch(() => { setS(p => ({ ...p, agentDown: true })); return null })
 
   useEffect(() => {
-    // Native shell first run: the app is bundled, the agent is remote —
-    // ask where it lives. (A prompt until there's a real settings surface.)
-    if (window.Capacitor?.isNativePlatform?.() && !localStorage.getItem('ceremony_agent_url')) {
-      const url = window.prompt('Where does the agent live?\n(e.g. https://ceremony-agent.fly.dev)')
+    // Native shell: the app is bundled, the agent is remote — ask where it
+    // lives on first run, and re-ask (prefilled, correctable) whenever the
+    // connection fails. (A prompt until there's a real settings surface.)
+    const nativeSetup = (force = false) => {
+      if (!window.Capacitor?.isNativePlatform?.()) return false
+      if (!force && localStorage.getItem('ceremony_agent_url')) return false
+      const url = window.prompt(
+        force ? 'Could not reach the agent. Check the URL:' : 'Where does the agent live?\n(e.g. https://ceremony-agent.fly.dev)',
+        localStorage.getItem('ceremony_agent_url') || 'https://',
+      )
       if (url) localStorage.setItem('ceremony_agent_url', url.trim().replace(/\/+$/, ''))
-      const tok = window.prompt('Agent token (leave blank if none)')
+      const tok = window.prompt('Agent token:', localStorage.getItem('ceremony_token') || '')
       if (tok) localStorage.setItem('ceremony_token', tok.trim())
+      return !!(url || tok)
     }
-    refresh().then(server => {
+    nativeSetup()
+    refresh().then(async (server) => {
+      if (!server && nativeSetup(true)) server = await refresh()
       if (!server) showToast('the agent is not listening — start the backend')
     })
     const iv = setInterval(refresh, 45000)
@@ -277,7 +286,7 @@ export default function App() {
     }))
 
   return (
-    <div style={{ width: '100%', height: '100dvh', maxWidth: 430, margin: '0 auto', background: BONE, display: 'flex', flexDirection: 'column', color: INK, position: 'relative', overflow: 'hidden' }}>
+    <div style={{ width: '100%', height: '100dvh', maxWidth: 430, margin: '0 auto', background: BONE, display: 'flex', flexDirection: 'column', color: INK, position: 'relative', overflow: 'hidden', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <Header clock={s.clock} />
 
       {s.screen === 'capture' && (
