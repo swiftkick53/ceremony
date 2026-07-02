@@ -1,0 +1,25 @@
+# Fly.io config for the Ceremony agent.
+# Secrets to set before first deploy (fly secrets set KEY=value):
+#   ANTHROPIC_API_KEY      the brain
+#   CEREMONY_TOKEN         bearer token the PWA must present
+#   CEREMONY_VAULT_REMOTE  https://x-access-token:<PAT>@github.com/<you>/ceremony-vault.git
+app = "ceremony-agent"
+primary_region = "ord"
+
+[env]
+  CEREMONY_VAULT = "/data/vault"
+
+[[mounts]]
+  source = "ceremony_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -25,6 +26,11 @@ VAULT_PATH = Path(os.environ.get(
     "CEREMONY_VAULT",
     Path(__file__).resolve().parent.parent / "vault",
 ))
+
+# Optional remote for the vault repo (hosted deployments). When set, a fresh
+# agent clones the vault from here instead of seeding an empty one, and every
+# commit is pushed back — the private remote is the vault's real home.
+VAULT_REMOTE = os.environ.get("CEREMONY_VAULT_REMOTE", "")
 
 DEFAULT_TOPICS = [
     {"id": "wk", "tag": "WK", "name": "work",    "color": "oklch(0.55 0.15 300)", "definition": "projects, deadlines, the professional thread"},
@@ -72,7 +78,16 @@ def _append_section(content: str, header: str, text: str) -> str:
 class Vault:
     def __init__(self, path: Path = VAULT_PATH):
         self.path = Path(path)
+        self._has_remote = False
         self._init()
+
+    def _ensure_remote(self):
+        """Adopt CEREMONY_VAULT_REMOTE as origin (or notice an existing origin)."""
+        has_origin = self._git("remote", "get-url", "origin", check=False).returncode == 0
+        if VAULT_REMOTE and not has_origin:
+            self._git("remote", "add", "origin", VAULT_REMOTE)
+            has_origin = True
+        self._has_remote = has_origin
 
     # ---------- git plumbing ----------
 
@@ -85,7 +100,23 @@ class Vault:
     def _commit(self, message: str) -> str:
         self._git("add", "-A")
         self._git("commit", "-m", message)
-        return self._git("rev-parse", "--short", "HEAD").stdout.strip()
+        head = self._git("rev-parse", "--short", "HEAD").stdout.strip()
+        self._push_async()
+        return head
+
+    _push_lock = threading.Lock()
+
+    def _push_async(self):
+        """Fire-and-forget push to origin, if the vault has one. Never blocks
+        or fails a request — the remote is a mirror, git history is the truth."""
+        if not self._has_remote:
+            return
+
+        def push():
+            with self._push_lock:
+                self._git("push", "-q", "origin", "HEAD", check=False)
+
+        threading.Thread(target=push, daemon=True).start()
 
     def head(self) -> str:
         return self._git("rev-parse", "--short", "HEAD").stdout.strip()
@@ -94,13 +125,29 @@ class Vault:
 
     def _init(self):
         if (self.path / ".git").exists():
+            self._ensure_remote()
             return
+        if VAULT_REMOTE:
+            res = subprocess.run(
+                ["git", "clone", "-q", VAULT_REMOTE, str(self.path)],
+                capture_output=True, text=True,
+            )
+            if res.returncode == 0:
+                self._git("config", "user.name", "ceremony-agent")
+                self._git("config", "user.email", "agent@ceremony.local")
+                if self._git("rev-parse", "HEAD", check=False).returncode == 0:
+                    (self.path / "inbox").mkdir(exist_ok=True)
+                    (self.path / "topics").mkdir(exist_ok=True)
+                    self._has_remote = True
+                    return
+                # cloned an empty repo — fall through and seed into it
         self.path.mkdir(parents=True, exist_ok=True)
         (self.path / "inbox").mkdir(exist_ok=True)
         (self.path / "topics").mkdir(exist_ok=True)
         subprocess.run(["git", "init", "-q"], cwd=self.path, check=True)
         self._git("config", "user.name", "ceremony-agent")
         self._git("config", "user.email", "agent@ceremony.local")
+        self._ensure_remote()
 
         self._write_code({"topics": DEFAULT_TOPICS})
         for t in DEFAULT_TOPICS:
@@ -170,18 +217,29 @@ class Vault:
 
     # ---------- filing ----------
 
+    def _write_audio(self, audio: bytes, audio_ext: str, stem: str) -> str:
+        """Keep the raw audio next to the raw dump in /inbox. Returns the rel path."""
+        rel = f"inbox/{stem}.{audio_ext}"
+        (self.path / "inbox").mkdir(exist_ok=True)
+        (self.path / rel).write_bytes(audio)
+        return rel
+
     def file_dump(self, raw_text: str, topic: dict, cleaned: str, summary: str,
                   research: list[str], confidence: float, verb: str = "filed",
                   detail_extra: list[str] | None = None,
-                  trailers_extra: list[str] | None = None) -> str:
+                  trailers_extra: list[str] | None = None,
+                  audio: bytes | None = None, audio_ext: str = "webm") -> str:
         """Land the raw dump in /inbox and the cleaned note on the topic page. One commit."""
         now = datetime.now()
         date, hm = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
-        inbox_rel = f"inbox/{now.strftime('%Y-%m-%d-%H%M%S')}-{uuid.uuid4().hex[:6]}.md"
+        stem = f"{now.strftime('%Y-%m-%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+        inbox_rel = f"inbox/{stem}.md"
         (self.path / "inbox").mkdir(exist_ok=True)
         (self.path / "topics").mkdir(exist_ok=True)
+        audio_rel = self._write_audio(audio, audio_ext, stem) if audio else None
+        audio_fm = f"audio: {audio_rel}\n" if audio_rel else ""
         (self.path / inbox_rel).write_text(
-            f"---\ndate: {date} {hm}\nfiled_to: {topic['id']}\n---\n\n{raw_text}\n"
+            f"---\ndate: {date} {hm}\nfiled_to: {topic['id']}\n{audio_fm}---\n\n{raw_text}\n"
         )
 
         page = self.page_path(topic)
@@ -198,11 +256,15 @@ class Vault:
         note_lines = 1 + len(cleaned.splitlines())
         detail = [f"+ {note_lines} lines → topics/{_slug(topic['name'])}.md",
                   f"raw dump kept → {inbox_rel}"]
+        if audio_rel:
+            detail.append(f"raw audio kept → {audio_rel}")
         detail += [f"+ //research: {q}" for q in research]
         detail += detail_extra or []
         body = "\n".join(detail)
         trailers = [f"Ceremony-Verb: {verb}", f"Ceremony-Topic: {topic['id']}",
                     f"Ceremony-Confidence: {confidence:.2f}", f"Ceremony-Inbox: {inbox_rel}"]
+        if audio_rel:
+            trailers.append(f"Ceremony-Audio: {audio_rel}")
         trailers += trailers_extra or []
         return self._commit(f"{verb}: {summary}\n\n{body}\n\n" + "\n".join(trailers))
 
@@ -218,11 +280,19 @@ class Vault:
         body = self._git("show", "-s", "--format=%B", commit).stdout
         inbox_match = re.search(r"^Ceremony-Inbox: (.+)$", body, re.M)
         conf_match = re.search(r"^Ceremony-Confidence: (.+)$", body, re.M)
+        audio_match = re.search(r"^Ceremony-Audio: (.+)$", body, re.M)
         if not inbox_match:
             raise ValueError(f"commit {commit} is not a filing commit")
         raw = (self.path / inbox_match.group(1)).read_text()
         raw_text = raw.split("---\n\n", 1)[-1].strip()
         confidence = float(conf_match.group(1)) if conf_match else 1.0
+        # read the audio before the revert removes it, so it survives the refile
+        audio, audio_ext = None, "webm"
+        if audio_match:
+            audio_path = self.path / audio_match.group(1)
+            if audio_path.exists():
+                audio = audio_path.read_bytes()
+                audio_ext = audio_path.suffix.lstrip(".") or "webm"
 
         self._git("revert", "--no-commit", commit)
         topic = self.topic(new_topic_id)
@@ -230,6 +300,7 @@ class Vault:
         new_commit = self.file_dump(
             raw_text, topic, raw_text, summary, [], confidence,
             verb="refiled", detail_extra=[f"moved by hand · was {commit}"],
+            audio=audio, audio_ext=audio_ext,
         )
         return new_commit, topic
 
@@ -245,19 +316,25 @@ class Vault:
         return self._read_queue()
 
     def queue_add(self, text: str, cleaned: str, summary: str, guess_id: str,
-                  confidence: float, research: list[str]) -> tuple[str, dict]:
+                  confidence: float, research: list[str],
+                  audio: bytes | None = None, audio_ext: str = "webm") -> tuple[str, dict]:
         entry = {
             "id": uuid.uuid4().hex[:8], "ts": time.time(),
             "text": text, "cleaned": cleaned, "summary": summary,
             "guess": guess_id, "confidence": round(confidence, 2),
             "research": research, "status": "pending", "commit": None,
         }
+        if audio:
+            # the audio lands in the vault the moment it's queued — nothing is lost
+            stem = f"{datetime.now().strftime('%Y-%m-%d-%H%M%S')}-{entry['id']}"
+            entry["audio"] = self._write_audio(audio, audio_ext, stem)
         q = self._read_queue()
         q.append(entry)
         self._write_queue(q)
+        audio_trailer = f"\nCeremony-Audio: {entry['audio']}" if audio else ""
         commit = self._commit(
             f"queued: {summary}\n\nconfidence {confidence:.2f} — below the bar, awaiting judgement\n\n"
-            f"Ceremony-Verb: queued\nCeremony-Topic: {guess_id}"
+            f"Ceremony-Verb: queued\nCeremony-Topic: {guess_id}{audio_trailer}"
         )
         return commit, entry
 
@@ -271,11 +348,17 @@ class Vault:
             entry.update(status="approved" if action == "approve" else "redirected",
                          ruled_to=target["id"])
             self._write_queue(q)
+            trailers = [f"Ceremony-Queue: {entry_id}"]
+            detail = ["ruled by hand · from the queue"]
+            if entry.get("audio"):
+                # audio already lives in /inbox from queue_add — just reference it
+                trailers.append(f"Ceremony-Audio: {entry['audio']}")
+                detail.append(f"raw audio kept → {entry['audio']}")
             self.file_dump(
                 entry["text"], target, entry.get("cleaned") or entry["text"],
                 entry["summary"], entry.get("research", []), entry["confidence"],
-                detail_extra=["ruled by hand · from the queue"],
-                trailers_extra=[f"Ceremony-Queue: {entry_id}"],
+                detail_extra=detail,
+                trailers_extra=trailers,
             )
         elif action == "discard":
             entry["status"] = "discarded"

@@ -11,19 +11,38 @@ API contract (per the design handoff):
   POST /api/refile {commit, topic_id}  move a filed dump to another topic
   POST /api/topics/{id}/recode {color} code / recode a topic
 """
+import os
 import re
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from brain import Brain, CONFIDENCE_BAR
 from vault import Vault, _append_section  # noqa: F401
 
+# When CEREMONY_TOKEN is set (hosted deployments), every /api request must
+# carry `Authorization: Bearer <token>`. Unset = open, for localhost dev.
+AUTH_TOKEN = os.environ.get("CEREMONY_TOKEN", "")
+
 app = FastAPI(title="ceremony-agent")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def require_token(request, call_next):
+    if (
+        AUTH_TOKEN
+        and request.url.path.startswith("/api")
+        and request.method != "OPTIONS"  # CORS preflight carries no auth header
+        and request.headers.get("authorization") != f"Bearer {AUTH_TOKEN}"
+    ):
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
 
 vault = Vault()
 brain = Brain()
@@ -71,11 +90,7 @@ def state():
     return s
 
 
-@app.post("/api/dump")
-def dump(body: DumpIn):
-    text = body.text.strip()
-    if not text:
-        raise HTTPException(400, "empty dump")
+def _process_dump(text: str, audio: bytes | None = None, audio_ext: str = "webm"):
     decision = brain.decide(text, vault.topics(), _excerpts())
 
     if decision.topic_id == "NEW" and decision.new_topic_name:
@@ -91,6 +106,7 @@ def dump(body: DumpIn):
         commit = vault.file_dump(
             text, topic, decision.cleaned_text, decision.summary,
             decision.research, decision.confidence,
+            audio=audio, audio_ext=audio_ext,
         )
         return {
             "queued": False, "commit": commit,
@@ -102,10 +118,35 @@ def dump(body: DumpIn):
     commit, entry = vault.queue_add(
         text, decision.cleaned_text, decision.summary,
         topic["id"], decision.confidence, decision.research,
+        audio=audio, audio_ext=audio_ext,
     )
     return {"queued": True, "commit": commit, "entry": entry,
             "topicId": topic["id"], "topicName": topic["name"],
             "confidence": decision.confidence, "brain": brain.last_mode}
+
+
+@app.post("/api/dump")
+def dump(body: DumpIn):
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(400, "empty dump")
+    return _process_dump(text)
+
+
+AUDIO_EXTS = {"audio/webm": "webm", "audio/mp4": "m4a", "audio/mpeg": "mp3",
+              "audio/ogg": "ogg", "audio/wav": "wav"}
+
+
+@app.post("/api/dump-audio")
+async def dump_audio(audio: UploadFile = File(...), text: str = Form("")):
+    """A dump with its raw audio. The transcript files as usual; the audio is
+    kept in the vault so a bad transcript is recoverable — nothing is lost."""
+    data = await audio.read()
+    if not data:
+        raise HTTPException(400, "empty audio")
+    mime = (audio.content_type or "").split(";")[0].strip()
+    ext = AUDIO_EXTS.get(mime) or (Path(audio.filename).suffix.lstrip(".") if audio.filename else "") or "webm"
+    return _process_dump(text.strip() or "(audio only — no transcript)", audio=data, audio_ext=ext)
 
 
 @app.post("/api/queue/{entry_id}/rule")
@@ -135,3 +176,11 @@ def recode(topic_id: str, body: RecodeIn):
         raise HTTPException(404, "no such topic")
     commit = vault.recode(topic_id, body.color)
     return {"commit": commit}
+
+
+# Hosted deployments bake the PWA build into agent/static so one app serves
+# both. Mounted last — /api routes take precedence. Absent in local dev.
+STATIC_DIR = Path(os.environ.get("CEREMONY_STATIC", Path(__file__).resolve().parent / "static"))
+if STATIC_DIR.is_dir():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="pwa")

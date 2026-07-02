@@ -65,6 +65,14 @@ export default function App() {
       .catch(() => { setS(p => ({ ...p, agentDown: true })); return null })
 
   useEffect(() => {
+    // Native shell first run: the app is bundled, the agent is remote —
+    // ask where it lives. (A prompt until there's a real settings surface.)
+    if (window.Capacitor?.isNativePlatform?.() && !localStorage.getItem('ceremony_agent_url')) {
+      const url = window.prompt('Where does the agent live?\n(e.g. https://ceremony-agent.fly.dev)')
+      if (url) localStorage.setItem('ceremony_agent_url', url.trim().replace(/\/+$/, ''))
+      const tok = window.prompt('Agent token (leave blank if none)')
+      if (tok) localStorage.setItem('ceremony_token', tok.trim())
+    }
     refresh().then(server => {
       if (!server) showToast('the agent is not listening — start the backend')
     })
@@ -112,12 +120,13 @@ export default function App() {
 
   // ---------- filing pipeline ----------
 
-  const fileText = async (text) => {
+  const fileText = async (text, audio = null) => {
     const seq = ++dumpSeq.current
     backgrounded.current = false
     setS(p => ({ ...p, phase: 'proc' }))
     try {
-      const [res] = await Promise.all([api.postDump(text), delay(MIN_PROC_MS)])
+      const dumpReq = audio ? api.postDumpAudio(text, audio.blob, audio.ext) : api.postDump(text)
+      const [res] = await Promise.all([dumpReq, delay(MIN_PROC_MS)])
       if (seq !== dumpSeq.current) return
       await refresh()
       if (res.queued) {
@@ -157,11 +166,13 @@ export default function App() {
         else stopMic()
       }
     },
-    end: () => {
-      sfx('end'); vibe(); stopMic()
+    end: async () => {
+      sfx('end'); vibe()
+      const audio = await (mic.current?.finish().catch(() => null) ?? null)
+      mic.current = null
       const text = s.liveText.trim()
       if (s.usedLive && text) {
-        fileText(text)
+        fileText(text, audio)
       } else {
         setS(p => ({ ...p, phase: 'idle', elapsed: 0, liveText: '' }))
         showToast(s.usedLive
