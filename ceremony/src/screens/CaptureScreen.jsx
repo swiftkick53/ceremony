@@ -9,7 +9,7 @@ const hubBase = {
 
 export default function CaptureScreen({
   phase, timer, micMode, transcript, text, topics, filed, redirectOpen,
-  showRecent, recent, totalPages, agentDown, angle, active, act,
+  showRecent, recent, totalPages, agentDown, outboxCount = 0, angle, active, act,
 }) {
   const isIdle = phase === 'idle', isRec = phase === 'rec', isProc = phase === 'proc'
   const isRouted = phase === 'routed', isType = phase === 'type'
@@ -26,6 +26,9 @@ export default function CaptureScreen({
             <div style={{ fontFamily: BODONI, fontSize: 33, lineHeight: 1.06, fontWeight: 500 }}>Speak, and it is filed.</div>
             {agentDown && (
               <div style={{ fontFamily: MONO, fontSize: 10, color: RED, marginTop: 8 }}>· the agent is not listening — start the backend</div>
+            )}
+            {outboxCount > 0 && (
+              <div style={{ fontFamily: MONO, fontSize: 10, color: grey(0.45), marginTop: agentDown ? 4 : 8 }}>· {outboxCount} dump{outboxCount > 1 ? 's' : ''} in the outbox — will file when the agent returns</div>
             )}
           </>
         )}

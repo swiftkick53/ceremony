@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { BONE, INK } from './tokens'
 import { SIM_WORDS } from './data'
 import * as api from './api'
+import * as outbox from './outbox'
 import { playCue, vibe } from './sfx'
 import { MicSession } from './mic'
 import Header from './components/Header'
@@ -44,6 +45,7 @@ export default function App() {
     openTopic: null,
     server: null, // {vault, topics, ledger, queue} from the agent
     agentDown: false,
+    outbox: 0, // dumps waiting in the offline outbox
     clock: fmtClock(),
   }))
 
@@ -51,6 +53,7 @@ export default function App() {
   const toastAction = useRef(null)
   const backgrounded = useRef(false)
   const dumpSeq = useRef(0)
+  const recStart = useRef(0)
 
   const sfx = (name) => playCue(name, SETTINGS.soundCues)
   const showToast = (msg, action = null, secs = 3.5) => {
@@ -59,9 +62,26 @@ export default function App() {
   }
   const stopMic = () => { mic.current?.stop(); mic.current = null }
 
+  const refreshOutbox = () => outbox.count().then(n => setS(p => p.outbox === n ? p : ({ ...p, outbox: n }))).catch(() => {})
+
+  // Re-file anything waiting in the offline outbox, oldest first.
+  const drainOutbox = async () => {
+    const filed = await outbox.drain(d =>
+      d.audioBlob ? api.postDumpAudio(d.text, d.audioBlob, d.audioExt) : api.postDump(d.text))
+    if (filed > 0) {
+      await refresh()
+      showToast(`outbox drained — ${filed} waiting dump${filed > 1 ? 's' : ''} filed`)
+    }
+    refreshOutbox()
+  }
+
   const refresh = () =>
     api.getState()
-      .then(server => { setS(p => ({ ...p, server, agentDown: false })); return server })
+      .then(server => {
+        setS(p => ({ ...p, server, agentDown: false }))
+        outbox.count().then(n => { if (n > 0) drainOutbox() }).catch(() => {})
+        return server
+      })
       .catch(() => { setS(p => ({ ...p, agentDown: true })); return null })
 
   useEffect(() => {
@@ -71,32 +91,44 @@ export default function App() {
     const nativeSetup = (force = false) => {
       if (!window.Capacitor?.isNativePlatform?.()) return false
       if (!force && localStorage.getItem('ceremony_agent_url')) return false
-      const url = window.prompt(
+      let url = window.prompt(
         force ? 'Could not reach the agent. Check the URL:' : 'Where does the agent live?\n(e.g. https://ceremony-agent.fly.dev)',
         localStorage.getItem('ceremony_agent_url') || 'https://',
       )
-      if (url) localStorage.setItem('ceremony_agent_url', url.trim().replace(/\/+$/, ''))
+      if (url) {
+        url = url.trim().replace(/\/+$/, '')
+        if (url && !/^https?:\/\//.test(url)) url = 'https://' + url
+        localStorage.setItem('ceremony_agent_url', url)
+      }
       const tok = window.prompt('Agent token:', localStorage.getItem('ceremony_token') || '')
       if (tok) localStorage.setItem('ceremony_token', tok.trim())
       return !!(url || tok)
     }
     nativeSetup()
+    refreshOutbox()
     refresh().then(async (server) => {
       if (!server && nativeSetup(true)) server = await refresh()
       if (!server) showToast('the agent is not listening — start the backend')
     })
     const iv = setInterval(refresh, 45000)
-    return () => clearInterval(iv)
+    const onOnline = () => refresh()
+    window.addEventListener('online', onOnline)
+    return () => { clearInterval(iv); window.removeEventListener('online', onOnline) }
   }, [])
 
   // 50ms tick drives the timer, wheel rotation, eased level, and toast countdown.
+  // When nothing is animating it returns the same state object, so the idle app
+  // doesn't re-render 20×/s (a real battery cost on a phone).
   useEffect(() => {
     const iv = setInterval(() => {
       setS(p => {
-        const n = { ...p, clock: fmtClock() }
+        const clock = fmtClock()
+        if (p.phase !== 'rec' && p.toastLeft <= 0 && p.clock === clock) return p
+        const n = { ...p, clock }
         const calm = SETTINGS.motionCalm
         if (p.phase === 'rec') {
-          n.elapsed = p.elapsed + 0.05
+          // wall-clock, not tick-count — setInterval is throttled in background tabs
+          n.elapsed = (Date.now() - recStart.current) / 1000
           let target = p.target
           if (p.usedLive) {
             const m = mic.current?.level()
@@ -156,8 +188,24 @@ export default function App() {
       }
     } catch (e) {
       if (seq !== dumpSeq.current) return
-      setS(p => ({ ...p, phase: 'idle', agentDown: true }))
-      showToast('filing failed — the agent is not listening')
+      if (e?.status === 401) {
+        setS(p => ({ ...p, phase: 'idle' }))
+        showToast('the agent refused the token — check it in settings')
+      } else if (e?.status) {
+        setS(p => ({ ...p, phase: 'idle' }))
+        showToast(`filing failed — ${e.message}`)
+      } else {
+        // never reached the agent: into the outbox, nothing is lost
+        try {
+          await outbox.add(text, audio?.blob || null, audio?.ext || null)
+          setS(p => ({ ...p, phase: 'idle', elapsed: 0, text: '', liveText: '', agentDown: true }))
+          showToast('agent unreachable — kept in the outbox, will file when it returns')
+          refreshOutbox()
+        } catch (e2) {
+          setS(p => ({ ...p, phase: 'idle', agentDown: true }))
+          showToast('filing failed — the agent is not listening')
+        }
+      }
     }
   }
 
@@ -167,6 +215,7 @@ export default function App() {
     // capture
     start: async () => {
       sfx('begin'); vibe()
+      recStart.current = Date.now()
       setS(p => ({ ...p, phase: 'rec', elapsed: 0, revealed: 0, level: 0.42, angle: 0, liveText: '', usedLive: false }))
       if (!SETTINGS.forceSimulated) {
         mic.current = new MicSession((txt) => setS(p => ({ ...p, liveText: txt })))
@@ -177,10 +226,15 @@ export default function App() {
     },
     end: async () => {
       sfx('end'); vibe()
-      const audio = await (mic.current?.finish().catch(() => null) ?? null)
+      const take = await (mic.current?.finish().catch(() => null) ?? null)
       mic.current = null
-      const text = s.liveText.trim()
-      if (s.usedLive && text) {
+      // the session's own transcript — it waited for the recognizer's final
+      // flush, so the last phrase isn't dropped by a quick END tap
+      const text = (take?.transcript || s.liveText).trim()
+      const audio = take?.blob ? { blob: take.blob, ext: take.ext } : null
+      if (s.usedLive && (text || audio)) {
+        // no transcript but recorded audio still files — the agent can
+        // transcribe server-side, and the raw audio is kept regardless
         fileText(text, audio)
       } else {
         setS(p => ({ ...p, phase: 'idle', elapsed: 0, liveText: '' }))
@@ -252,9 +306,17 @@ export default function App() {
     obGrant: async () => {
       let granted = false
       try {
-        const st = await navigator.mediaDevices.getUserMedia({ audio: true })
-        st.getTracks().forEach(t => t.stop())
-        granted = true
+        if (window.Capacitor?.isNativePlatform?.()) {
+          // on iOS the take runs through Apple's recognizer, so this is the
+          // permission pair that matters (mic + speech) — not getUserMedia
+          const { SpeechRecognition } = await import('@capacitor-community/speech-recognition')
+          const perm = await SpeechRecognition.requestPermissions()
+          granted = perm?.speechRecognition === 'granted'
+        } else {
+          const st = await navigator.mediaDevices.getUserMedia({ audio: true })
+          st.getTracks().forEach(t => t.stop())
+          granted = true
+        }
       } catch (e) { /* denied — typing still works */ }
       setS(p => ({ ...p, micGranted: granted, ob: 3 }))
     },
@@ -295,7 +357,7 @@ export default function App() {
           transcript={transcript} text={s.text} topics={codedTopics}
           filed={s.filed} redirectOpen={s.redirectOpen}
           showRecent={SETTINGS.showRecent} recent={recent}
-          totalPages={totalPages} agentDown={s.agentDown}
+          totalPages={totalPages} agentDown={s.agentDown} outboxCount={s.outbox}
           angle={s.angle} active={s.active} act={act}
         />
       )}

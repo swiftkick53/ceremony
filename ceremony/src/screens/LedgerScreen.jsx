@@ -4,6 +4,7 @@ import { INSET_BG, JOST, BODONI, MONO, hair, grey } from '../tokens'
 const VERB_LABEL = {
   filed: 'filed', refiled: 'refiled', queued: 'held for judgement',
   coded: 'coded', recoded: 'recoded', reverted: 'reverted', discarded: 'discarded',
+  researched: 'researched', rewove: 'rewove', digest: 'digest written',
 }
 
 export default function LedgerScreen({ days, topicById, openEntry, act }) {

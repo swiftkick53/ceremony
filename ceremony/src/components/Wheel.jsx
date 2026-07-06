@@ -23,13 +23,15 @@ export default function Wheel({ topics, phase, angle, active, filedToId }) {
   const rec = phase === 'rec', routed = phase === 'routed'
   const cols = topics.map(t => t.color)
   const step = 360 / cols.length
-  const fi = Math.max(0, topics.findIndex(t => t.id === filedToId))
+  // -1 when the dump filed to a topic not on the wheel (a newborn, uncoded
+  // one) — light nothing rather than falsely lighting the first segment
+  const fi = topics.findIndex(t => t.id === filedToId)
 
   const segs = cols.map((col, i) => {
     const a0 = i * step
     let op = 0.34
     if (rec) op = i === (active % cols.length) ? 1 : 0.22
-    else if (routed) op = i === fi ? 1 : 0.12
+    else if (routed) op = fi >= 0 ? (i === fi ? 1 : 0.12) : 0.2
     return (
       <path key={i} d={seg(a0, a0 + step)} fill={col} opacity={op}
         stroke={BONE} strokeWidth={2} style={{ transition: 'opacity .6s ease' }} />
@@ -45,7 +47,7 @@ export default function Wheel({ topics, phase, angle, active, filedToId }) {
   }
 
   let ptr = null
-  if (routed) {
+  if (routed && fi >= 0) {
     const [px, py] = pol(fi * step + step / 2, R + 24)
     ptr = <circle cx={px} cy={py} r={4} fill={cols[fi]} />
   }

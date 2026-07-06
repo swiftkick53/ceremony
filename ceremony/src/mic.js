@@ -8,9 +8,14 @@ import { SpeechRecognition as NativeSR } from '@capacitor-community/speech-recog
 const RECORDER_MIMES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
 const extFor = (mime) => mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm'
 
+// A wedged recorder/recognizer must never hang the END tap forever.
+const within = (promise, ms, fallback = null) =>
+  Promise.race([promise, new Promise(r => setTimeout(() => r(fallback), ms))])
+
 export class MicSession {
   constructor(onTranscript) {
     this.onTranscript = onTranscript
+    this.transcript = ''
     this.stream = null
     this.actx = null
     this.analyser = null
@@ -20,6 +25,11 @@ export class MicSession {
     this.chunks = []
     this.mime = ''
     this.native = Capacitor.isNativePlatform()
+  }
+
+  _setTranscript(t) {
+    this.transcript = t
+    this.onTranscript(t)
   }
 
   async start() {
@@ -64,7 +74,7 @@ export class MicSession {
         if (r.isFinal) fin += r[0].transcript + ' '
         else interim += r[0].transcript
       }
-      this.onTranscript((fin + interim).trim())
+      this._setTranscript((fin + interim).trim())
     }
     try { this.sr.start() } catch (e) { /* already started */ }
   }
@@ -79,7 +89,7 @@ export class MicSession {
       await NativeSR.removeAllListeners()
       NativeSR.addListener('partialResults', (data) => {
         const t = data?.matches?.[0] || ''
-        if (t) this.onTranscript(t)
+        if (t) this._setTranscript(t)
       })
       await NativeSR.start({ partialResults: true, popup: false })
       return true
@@ -106,35 +116,51 @@ export class MicSession {
     return Math.min(1, Math.sqrt(sum / this.buf.length) * 4)
   }
 
-  // End the take and hand back the recorded audio: { blob, ext } | null.
+  // End the take. The last phrase's *final* recognition result usually lands
+  // only after stop() — wait for it (bounded) so the tail isn't dropped.
+  // Hands back { blob, ext, transcript } — blob/ext null when nothing recorded.
   async finish() {
-    this._stopSR()
-    let out = null
+    await this._stopSRFlush()
+    let blob = null, ext = null
     if (this.rec && this.rec.state !== 'inactive') {
-      out = await new Promise((resolve) => {
+      const out = await within(new Promise((resolve) => {
         this.rec.onstop = () => {
-          const blob = new Blob(this.chunks, { type: this.mime.split(';')[0] })
-          resolve(blob.size ? { blob, ext: extFor(this.mime) } : null)
+          const b = new Blob(this.chunks, { type: this.mime.split(';')[0] })
+          resolve(b.size ? { blob: b, ext: extFor(this.mime) } : null)
         }
         try { this.rec.stop() } catch (e) { resolve(null) }
-      })
+      }), 2000)
+      if (out) ({ blob, ext } = out)
     }
     this._teardown()
-    return out
+    return { blob, ext, transcript: this.transcript.trim() }
   }
 
   // Abandon the take: stop everything, keep nothing.
   stop() {
-    this._stopSR()
+    if (this.sr) { try { this.sr.onresult = null; this.sr.stop() } catch (e) {} this.sr = null }
+    if (this.native) {
+      NativeSR.stop().catch(() => {})
+      NativeSR.removeAllListeners().catch(() => {})
+    }
     if (this.rec && this.rec.state !== 'inactive') { try { this.rec.stop() } catch (e) {} }
     this._teardown()
   }
 
-  _stopSR() {
-    if (this.sr) { try { this.sr.stop() } catch (e) {} this.sr = null }
+  async _stopSRFlush() {
+    if (this.sr) {
+      const sr = this.sr
+      this.sr = null
+      await within(new Promise((resolve) => {
+        sr.onend = resolve
+        try { sr.stop() } catch (e) { resolve() }
+      }), 1000)
+    }
     if (this.native) {
-      NativeSR.stop().catch(() => {})
-      NativeSR.removeAllListeners().catch(() => {})
+      await NativeSR.stop().catch(() => {})
+      // Apple's recognizer often delivers the final partial just after stop
+      await new Promise(r => setTimeout(r, 350))
+      await NativeSR.removeAllListeners().catch(() => {})
     }
   }
 
