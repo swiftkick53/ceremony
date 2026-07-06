@@ -42,7 +42,10 @@ never file on its own — so every dump goes to the Queue for your judgement.
 The pipe still works end to end; it just always asks.
 
 Knobs (env vars for the agent): `CEREMONY_VAULT` (vault path),
-`CEREMONY_CONFIDENCE` (filing bar, default 0.75), `CEREMONY_MODEL`.
+`CEREMONY_CONFIDENCE` (filing bar, default 0.75), `CEREMONY_MODEL`,
+`OPENAI_API_KEY` (enables server-side Whisper transcription),
+`CEREMONY_RESEARCH=0` / `CEREMONY_REWEAVE=0` (disable those workers),
+`CEREMONY_REWEAVE_HOUR` (nightly reweave hour, default 3).
 
 ## How filing works
 
@@ -55,10 +58,26 @@ Knobs (env vars for the agent): `CEREMONY_VAULT` (vault path),
    screen is parsed `git log`; revert is `git revert`; the topic→colour map
    lives in `vault/code.yml` so Obsidian theming can share it.
 
-## Still to build (per the plan's later phases)
+## The later phases, now built
 
-- Server-side Whisper transcription (the browser transcript is Chrome-only).
-- Actual web research answering the `//research` queue (Phase 4).
-- Nightly reweave: dedup, backlinks, consolidation, weekly digest (Phase 3/5).
-- Offline capture queue in the PWA service worker; push notifications.
-- Hosting the agent on an always-on box so phone dumps file with the laptop shut.
+- **Server-side Whisper transcription** — set `OPENAI_API_KEY` and dumps whose
+  browser transcript came up empty are transcribed from the recorded audio
+  before filing, so voice capture works beyond Chrome.
+- **Research (Phase 4)** — `//research` flags become `- [ ]` items on the topic
+  page; a background worker answers them with Claude + web search and writes a
+  cited findings block (one commit per answer, `Ceremony-Verb: researched`).
+  Trigger a pass any time with `POST /api/reweave`'s sibling
+  `POST /api/research/run`.
+- **Nightly reweave (Phase 3/5)** — at `CEREMONY_REWEAVE_HOUR` the agent
+  proposes backlinks (append-only, into `## Links`), flags duplicate topics
+  for consolidation (proposed in the digest — merging stays a human decision),
+  and writes a weekly digest to `digest.md`. `POST /api/reweave` runs it now.
+  The journal is private and never rewoven.
+- **Offline capture outbox** — a dump that can't reach the agent waits in
+  IndexedDB and files itself when the agent is reachable again. Nothing is
+  lost.
+
+## Still to build
+
+- Push notifications (needs a push service + VAPID keys — the outbox and
+  toasts cover the capture loop without it).
