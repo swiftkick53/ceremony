@@ -11,6 +11,7 @@ API contract (per the design handoff):
   POST /api/refile {commit, topic_id}  move a filed dump to another topic
   POST /api/topics/{id}/recode {color} code / recode a topic
 """
+import hmac
 import os
 import re
 from pathlib import Path
@@ -20,8 +21,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+import reweave as reweave_mod
+import transcribe
 from brain import Brain, CONFIDENCE_BAR
-from vault import Vault, _append_section  # noqa: F401
+from research import ResearchWorker
+from vault import Vault, VaultError, _append_section  # noqa: F401
 
 # When CEREMONY_TOKEN is set (hosted deployments), every /api request must
 # carry `Authorization: Bearer <token>`. Unset = open, for localhost dev.
@@ -39,13 +43,34 @@ async def require_token(request, call_next):
         AUTH_TOKEN
         and request.url.path.startswith("/api")
         and request.method != "OPTIONS"  # CORS preflight carries no auth header
-        and request.headers.get("authorization") != f"Bearer {AUTH_TOKEN}"
+        and not hmac.compare_digest(
+            request.headers.get("authorization", ""), f"Bearer {AUTH_TOKEN}")
     ):
         return JSONResponse({"detail": "unauthorized"}, status_code=401)
     return await call_next(request)
 
 vault = Vault()
 brain = Brain()
+research = ResearchWorker(vault, brain.client)
+reweave_mod.start_nightly(vault, brain.client, research)
+research.kick()  # answer anything left pending across a restart
+
+
+# Vault errors map to honest HTTP codes instead of opaque 500s; the vault
+# itself has already rolled back to its last committed state.
+@app.exception_handler(KeyError)
+async def _not_found(request, exc):
+    return JSONResponse({"detail": str(exc.args[0]) if exc.args else "not found"}, status_code=404)
+
+
+@app.exception_handler(ValueError)
+async def _bad_request(request, exc):
+    return JSONResponse({"detail": str(exc)}, status_code=400)
+
+
+@app.exception_handler(VaultError)
+async def _conflict(request, exc):
+    return JSONResponse({"detail": str(exc)}, status_code=409)
 
 
 class DumpIn(BaseModel):
@@ -86,28 +111,36 @@ def _excerpts() -> dict[str, str]:
 def state():
     s = vault.state()
     s["brain"] = brain.last_mode or ("claude?" if not brain._auth_failed else "lexical")
+    s["brainError"] = brain.last_error
     s["confidenceBar"] = CONFIDENCE_BAR
+    s["research"] = {"pending": len(vault.pending_research())}
+    s["transcription"] = transcribe.available()
     return s
 
 
 def _process_dump(text: str, audio: bytes | None = None, audio_ext: str = "webm"):
     decision = brain.decide(text, vault.topics(), _excerpts())
 
-    if decision.topic_id == "NEW" and decision.new_topic_name:
+    filing = decision.confidence >= CONFIDENCE_BAR
+    if decision.topic_id == "NEW" and decision.new_topic_name and filing:
         topic = vault.create_topic(decision.new_topic_name, definition=decision.summary)
     else:
+        # below the bar a NEW topic is not born yet — the guess falls back to
+        # the inbox so a discarded dump doesn't leave an orphan page behind
         topic = vault.topic(decision.topic_id) or vault.topic("in")
 
     excerpt = decision.cleaned_text
     if len(excerpt) > 150:
         excerpt = excerpt[:150].strip() + "…"
 
-    if decision.confidence >= CONFIDENCE_BAR:
+    if filing:
         commit = vault.file_dump(
             text, topic, decision.cleaned_text, decision.summary,
             decision.research, decision.confidence,
             audio=audio, audio_ext=audio_ext,
         )
+        if decision.research:
+            research.kick()
         return {
             "queued": False, "commit": commit,
             "topicId": topic["id"], "topicName": topic["name"],
@@ -140,22 +173,37 @@ AUDIO_EXTS = {"audio/webm": "webm", "audio/mp4": "m4a", "audio/mpeg": "mp3",
 @app.post("/api/dump-audio")
 async def dump_audio(audio: UploadFile = File(...), text: str = Form("")):
     """A dump with its raw audio. The transcript files as usual; the audio is
-    kept in the vault so a bad transcript is recoverable — nothing is lost."""
+    kept in the vault so a bad transcript is recoverable — nothing is lost.
+    With no usable browser transcript, server-side Whisper (when configured)
+    transcribes before filing, so voice capture works beyond Chrome."""
     data = await audio.read()
     if not data:
         raise HTTPException(400, "empty audio")
     mime = (audio.content_type or "").split(";")[0].strip()
     ext = AUDIO_EXTS.get(mime) or (Path(audio.filename).suffix.lstrip(".") if audio.filename else "") or "webm"
-    return _process_dump(text.strip() or "(audio only — no transcript)", audio=data, audio_ext=ext)
+    transcript = text.strip()
+    if not transcript:
+        transcript = transcribe.transcribe(data, ext) or ""
+    return _process_dump(transcript or "(audio only — no transcript)", audio=data, audio_ext=ext)
 
 
 @app.post("/api/queue/{entry_id}/rule")
 def rule(entry_id: str, body: RuleIn):
-    try:
-        entry = vault.queue_rule(entry_id, body.action, body.topic_id)
-    except StopIteration:
-        raise HTTPException(404, "no such queue entry")
-    return {"entry": entry}
+    return {"entry": vault.queue_rule(entry_id, body.action, body.topic_id)}
+
+
+@app.post("/api/research/run")
+def research_run():
+    """Answer everything waiting in the ## Research sections, in the background."""
+    pending = vault.pending_research()
+    research.kick()
+    return {"pending": len(pending), "enabled": research.enabled}
+
+
+@app.post("/api/reweave")
+def reweave_now():
+    """Run tonight's reweave right now (links, dedup proposals, weekly digest)."""
+    return reweave_mod.run(vault, brain.client)
 
 
 @app.post("/api/revert")
