@@ -8,8 +8,21 @@ const authHeaders = () => {
   return t ? { Authorization: `Bearer ${t}` } : {}
 }
 
+// Errors carry .status when the agent answered (auth failure, bad request…)
+// and no .status when it was never reached — the UI and outbox tell them apart.
+export class ApiError extends Error {
+  constructor(status, detail) {
+    super(detail || `agent error ${status}`)
+    this.status = status
+  }
+}
+
 const j = async (r) => {
-  if (!r.ok) throw new Error(`agent error ${r.status}`)
+  if (!r.ok) {
+    let detail = ''
+    try { detail = (await r.json()).detail } catch (e) { /* no body */ }
+    throw new ApiError(r.status, detail)
+  }
   return r.json()
 }
 const get = (url) => fetch(base() + url, { headers: authHeaders() }).then(j)
@@ -31,3 +44,5 @@ export const ruleQueue = (id, action, topicId) => post(`/api/queue/${id}/rule`, 
 export const revertCommit = (commit) => post('/api/revert', { commit })
 export const refileCommit = (commit, topicId) => post('/api/refile', { commit, topic_id: topicId })
 export const recodeTopic = (id, color) => post(`/api/topics/${id}/recode`, { color })
+export const runResearch = () => post('/api/research/run', {})
+export const runReweave = () => post('/api/reweave', {})

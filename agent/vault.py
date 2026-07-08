@@ -18,6 +18,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timedelta
+from functools import wraps
 from pathlib import Path
 
 import yaml
@@ -31,6 +32,11 @@ VAULT_PATH = Path(os.environ.get(
 # agent clones the vault from here instead of seeding an empty one, and every
 # commit is pushed back — the private remote is the vault's real home.
 VAULT_REMOTE = os.environ.get("CEREMONY_VAULT_REMOTE", "")
+
+class VaultError(Exception):
+    """A vault operation that could not be applied cleanly (e.g. a revert that
+    conflicts). The vault has been restored to its last committed state."""
+
 
 DEFAULT_TOPICS = [
     {"id": "wk", "tag": "WK", "name": "work",    "color": "oklch(0.55 0.15 300)", "definition": "projects, deadlines, the professional thread"},
@@ -75,11 +81,35 @@ def _append_section(content: str, header: str, text: str) -> str:
     return "\n".join(new_lines).rstrip("\n") + "\n"
 
 
+def _mutating(fn):
+    """Serialize vault mutations and make them atomic: concurrent requests
+    (FastAPI runs sync endpoints on a threadpool) must not interleave their
+    `git add -A` / commit, and a half-applied operation must never leak into
+    the next commit. On any failure the working tree is restored to HEAD."""
+    @wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            try:
+                return fn(self, *args, **kwargs)
+            except Exception:
+                self._restore_clean()
+                raise
+    return wrapper
+
+
 class Vault:
     def __init__(self, path: Path = VAULT_PATH):
         self.path = Path(path)
         self._has_remote = False
+        self._lock = threading.RLock()
+        self.sync_error: str | None = None
         self._init()
+
+    def _restore_clean(self):
+        """Drop any uncommitted state a failed operation left behind."""
+        for args in (("revert", "--abort"), ("rebase", "--abort"),
+                     ("reset", "--hard", "HEAD"), ("clean", "-fdq")):
+            self._git(*args, check=False)
 
     def _ensure_remote(self):
         """Adopt CEREMONY_VAULT_REMOTE as origin (or notice an existing origin)."""
@@ -99,6 +129,9 @@ class Vault:
 
     def _commit(self, message: str) -> str:
         self._git("add", "-A")
+        if self._git("diff", "--cached", "--quiet", check=False).returncode == 0:
+            # e.g. reverting a commit whose changes are already undone
+            raise VaultError("nothing changed — that action was already applied")
         self._git("commit", "-m", message)
         head = self._git("rev-parse", "--short", "HEAD").stdout.strip()
         self._push_async()
@@ -108,13 +141,24 @@ class Vault:
 
     def _push_async(self):
         """Fire-and-forget push to origin, if the vault has one. Never blocks
-        or fails a request — the remote is a mirror, git history is the truth."""
+        or fails a request — the remote is a mirror, git history is the truth.
+        A rejected push (e.g. the vault was edited from another machine) is
+        retried once after `pull --rebase`; persistent failure is surfaced
+        via sync_error so the client can show it instead of silently drifting."""
         if not self._has_remote:
             return
 
         def push():
             with self._push_lock:
-                self._git("push", "-q", "origin", "HEAD", check=False)
+                res = self._git("push", "-q", "origin", "HEAD", check=False)
+                if res.returncode != 0:
+                    with self._lock:
+                        pull = self._git("pull", "--rebase", "-q", "origin", "HEAD", check=False)
+                        if pull.returncode != 0:
+                            self._git("rebase", "--abort", check=False)
+                    res = self._git("push", "-q", "origin", "HEAD", check=False)
+                self.sync_error = None if res.returncode == 0 else (
+                    (res.stderr or "push failed").strip().splitlines()[-1][:200])
 
         threading.Thread(target=push, daemon=True).start()
 
@@ -144,7 +188,9 @@ class Vault:
         self.path.mkdir(parents=True, exist_ok=True)
         (self.path / "inbox").mkdir(exist_ok=True)
         (self.path / "topics").mkdir(exist_ok=True)
-        subprocess.run(["git", "init", "-q"], cwd=self.path, check=True)
+        # -b main so pushes land on the branch GitHub expects; older git falls back
+        if subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.path).returncode != 0:
+            subprocess.run(["git", "init", "-q"], cwd=self.path, check=True)
         self._git("config", "user.name", "ceremony-agent")
         self._git("config", "user.email", "agent@ceremony.local")
         self._ensure_remote()
@@ -176,6 +222,7 @@ class Vault:
     def page_path(self, topic: dict) -> Path:
         return self.path / "topics" / f"{_slug(topic['name'])}.md"
 
+    @_mutating
     def create_topic(self, name: str, definition: str = "") -> dict:
         """New topic born of the agent — uncoded (no colour) until the user codes it."""
         code = self._read_code()
@@ -194,9 +241,12 @@ class Vault:
         self._write_moc()
         return topic
 
+    @_mutating
     def recode(self, topic_id: str, color: str) -> str:
         code = self._read_code()
-        topic = next(t for t in code["topics"] if t["id"] == topic_id)
+        topic = next((t for t in code["topics"] if t["id"] == topic_id), None)
+        if topic is None:
+            raise KeyError(f"no such topic: {topic_id}")
         was_uncoded = topic["color"] is None
         topic["color"] = color
         self._write_code(code)
@@ -224,6 +274,7 @@ class Vault:
         (self.path / rel).write_bytes(audio)
         return rel
 
+    @_mutating
     def file_dump(self, raw_text: str, topic: dict, cleaned: str, summary: str,
                   research: list[str], confidence: float, verb: str = "filed",
                   detail_extra: list[str] | None = None,
@@ -268,22 +319,41 @@ class Vault:
         trailers += trailers_extra or []
         return self._commit(f"{verb}: {summary}\n\n{body}\n\n" + "\n".join(trailers))
 
+    @_mutating
     def revert(self, commit: str) -> str:
-        self._git("revert", "--no-commit", commit)
+        res = self._git("revert", "--no-commit", commit, check=False)
+        if res.returncode != 0:
+            raise VaultError(
+                f"commit {commit} cannot be reverted cleanly — "
+                "it may already be undone, or later commits touch the same lines"
+            )
         return self._commit(
             f"reverted: commit {commit} undone.\n\nnothing is lost — see git history\n\n"
             f"Ceremony-Verb: reverted\nCeremony-Reverts: {commit}"
         )
 
+    @_mutating
     def refile(self, commit: str, new_topic_id: str) -> tuple[str, dict]:
         """Undo a filing commit and file the same dump to a different topic, in one commit."""
-        body = self._git("show", "-s", "--format=%B", commit).stdout
+        topic = self.topic(new_topic_id)
+        if topic is None:
+            raise KeyError(f"no such topic: {new_topic_id}")
+        show = self._git("show", "-s", "--format=%B", commit, check=False)
+        if show.returncode != 0:
+            raise KeyError(f"no such commit: {commit}")
+        body = show.stdout
         inbox_match = re.search(r"^Ceremony-Inbox: (.+)$", body, re.M)
         conf_match = re.search(r"^Ceremony-Confidence: (.+)$", body, re.M)
         audio_match = re.search(r"^Ceremony-Audio: (.+)$", body, re.M)
         if not inbox_match:
             raise ValueError(f"commit {commit} is not a filing commit")
-        raw = (self.path / inbox_match.group(1)).read_text()
+        inbox_path = self.path / inbox_match.group(1)
+        if not inbox_path.exists():
+            raise VaultError(
+                f"the raw dump of {commit} is gone from the inbox — "
+                "was that filing already reverted?"
+            )
+        raw = inbox_path.read_text()
         raw_text = raw.split("---\n\n", 1)[-1].strip()
         confidence = float(conf_match.group(1)) if conf_match else 1.0
         # read the audio before the revert removes it, so it survives the refile
@@ -294,8 +364,9 @@ class Vault:
                 audio = audio_path.read_bytes()
                 audio_ext = audio_path.suffix.lstrip(".") or "webm"
 
-        self._git("revert", "--no-commit", commit)
-        topic = self.topic(new_topic_id)
+        res = self._git("revert", "--no-commit", commit, check=False)
+        if res.returncode != 0:
+            raise VaultError(f"commit {commit} cannot be refiled — the revert does not apply cleanly")
         summary = raw_text[:70].replace("\n", " ") + ("…" if len(raw_text) > 70 else "")
         new_commit = self.file_dump(
             raw_text, topic, raw_text, summary, [], confidence,
@@ -315,6 +386,7 @@ class Vault:
     def queue(self) -> list[dict]:
         return self._read_queue()
 
+    @_mutating
     def queue_add(self, text: str, cleaned: str, summary: str, guess_id: str,
                   confidence: float, research: list[str],
                   audio: bytes | None = None, audio_ext: str = "webm") -> tuple[str, dict]:
@@ -338,13 +410,20 @@ class Vault:
         )
         return commit, entry
 
+    @_mutating
     def queue_rule(self, entry_id: str, action: str, topic_id: str | None = None) -> dict:
         """Rule on a held dump. Every ruling is one commit tagged Ceremony-Queue,
         so undo is `git revert` of that commit (which also restores the queue file)."""
         q = self._read_queue()
-        entry = next(e for e in q if e["id"] == entry_id)
+        entry = next((e for e in q if e["id"] == entry_id), None)
+        if entry is None:
+            raise KeyError(f"no such queue entry: {entry_id}")
         if action in ("approve", "redirect"):
+            if entry["status"] != "pending":
+                raise ValueError(f"entry {entry_id} was already ruled on")
             target = self.topic(topic_id or entry["guess"])
+            if target is None:
+                raise KeyError(f"no such topic: {topic_id or entry['guess']}")
             entry.update(status="approved" if action == "approve" else "redirected",
                          ruled_to=target["id"])
             self._write_queue(q)
@@ -361,6 +440,8 @@ class Vault:
                 trailers_extra=trailers,
             )
         elif action == "discard":
+            if entry["status"] != "pending":
+                raise ValueError(f"entry {entry_id} was already ruled on")
             entry["status"] = "discarded"
             self._write_queue(q)
             self._commit(
@@ -369,6 +450,8 @@ class Vault:
                 f"Ceremony-Queue: {entry_id}"
             )
         elif action == "undo":
+            if entry["status"] == "pending":
+                return entry  # nothing to undo — a double-tap must not revert twice
             res = self._git("log", "--format=%h", f"--grep=Ceremony-Queue: {entry_id}",
                             "-1", check=False)
             ruling_commit = res.stdout.strip().splitlines()[0] if res.stdout.strip() else None
@@ -380,7 +463,99 @@ class Vault:
                 self._commit(f"queued: ruling on {entry_id} undone\n\nCeremony-Verb: queued")
             q = self._read_queue()
             entry = next(e for e in q if e["id"] == entry_id)
+        else:
+            raise ValueError(f"unknown action: {action}")
         return entry
+
+    # ---------- research ----------
+
+    RESEARCH_ITEM = re.compile(r"^- \[ \] (.+?) — queued (\d{4}-\d{2}-\d{2})$", re.M)
+
+    def pending_research(self) -> list[dict]:
+        """Unanswered `- [ ]` items from every topic's ## Research section."""
+        out = []
+        for t in self.topics():
+            page = self.page_path(t)
+            if not page.exists():
+                continue
+            m = re.search(r"## Research\n(.*?)(?=\n## |\Z)", page.read_text(), re.S)
+            if not m:
+                continue
+            for item in self.RESEARCH_ITEM.finditer(m.group(1)):
+                out.append({"topic_id": t["id"], "topic_name": t["name"],
+                            "question": item.group(1), "queued": item.group(2)})
+        return out
+
+    @_mutating
+    def write_research_answer(self, topic_id: str, question: str, findings_md: str) -> str:
+        """Check the item off and append the cited findings beneath it. One commit."""
+        topic = self.topic(topic_id)
+        if topic is None:
+            raise KeyError(f"no such topic: {topic_id}")
+        page = self.page_path(topic)
+        content = page.read_text()
+        date = datetime.now().strftime("%Y-%m-%d")
+        needle = f"- [ ] {question} — queued "
+        idx = content.find(needle)
+        if idx == -1:
+            raise ValueError(f"research item not found on [[{topic['name']}]]: {question}")
+        line_end = content.index("\n", idx) if "\n" in content[idx:] else len(content)
+        block = (f"- [x] {question} — answered {date}\n"
+                 + "\n".join("  " + ln if ln.strip() else "" for ln in findings_md.strip().splitlines()))
+        content = content[:idx] + block + content[line_end:]
+        content = _append_section(content, "Log", f"{date}  researched · {question[:60]}")
+        page.write_text(content)
+        short_q = question[:70] + ("…" if len(question) > 70 else "")
+        return self._commit(
+            f"researched: {short_q}\n\n+ cited findings → topics/{_slug(topic['name'])}.md\n\n"
+            f"Ceremony-Verb: researched\nCeremony-Topic: {topic_id}"
+        )
+
+    # ---------- reweave ----------
+
+    @_mutating
+    def update_links(self, topic_id: str, links: list[str]) -> str | None:
+        """Union new wikilinks into a topic page's ## Links section. Append-only —
+        reweave never removes a link a human may have placed. None if no change."""
+        topic = self.topic(topic_id)
+        if topic is None:
+            raise KeyError(f"no such topic: {topic_id}")
+        page = self.page_path(topic)
+        content = page.read_text()
+        m = re.search(r"## Links\n(.*?)(?=\n## |\Z)", content, re.S)
+        existing = set(re.findall(r"\[\[([^\]]+)\]\]", m.group(1))) if m else set()
+        fresh = [l for l in links if l not in existing and _slug(l) != _slug(topic["name"])]
+        if not fresh:
+            return None
+        line = " ".join(f"[[{l}]]" for l in fresh)
+        content = _append_section(content, "Links", line)
+        date = datetime.now().strftime("%Y-%m-%d")
+        content = _append_section(content, "Log", f"{date}  rewove · linked {', '.join(fresh)}")
+        page.write_text(content)
+        return self._commit(
+            f"rewove: [[{topic['name']}]] linked to {', '.join(fresh)}\n\n"
+            f"Ceremony-Verb: rewove\nCeremony-Topic: {topic_id}"
+        )
+
+    @_mutating
+    def write_digest(self, body_md: str) -> str:
+        """Prepend this week's digest to digest.md. One commit."""
+        date = datetime.now().strftime("%Y-%m-%d")
+        path = self.path / "digest.md"
+        old = path.read_text() if path.exists() else "# Digest\n\nagent-written, weekly. newest first.\n"
+        head, _, rest = old.partition("\n## ")
+        section = f"\n## week of {date}\n\n{body_md.strip()}\n"
+        path.write_text(head.rstrip("\n") + "\n" + section + (("\n## " + rest) if rest else ""))
+        return self._commit(
+            f"digest: the week of {date}, rewoven\n\nCeremony-Verb: digest"
+        )
+
+    def last_digest_date(self):
+        path = self.path / "digest.md"
+        if not path.exists():
+            return None
+        m = re.search(r"^## week of (\d{4}-\d{2}-\d{2})$", path.read_text(), re.M)
+        return datetime.strptime(m.group(1), "%Y-%m-%d").date() if m else None
 
     # ---------- the ledger ----------
 
@@ -445,4 +620,6 @@ class Vault:
             "topics": enriched,
             "ledger": ledger,
             "queue": self._read_queue(),
+            "sync": ({"remote": True, "error": self.sync_error}
+                     if self._has_remote else {"remote": False, "error": None}),
         }

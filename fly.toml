@@ -3,6 +3,7 @@
 #   ANTHROPIC_API_KEY      the brain
 #   CEREMONY_TOKEN         bearer token the PWA must present
 #   CEREMONY_VAULT_REMOTE  https://x-access-token:<PAT>@github.com/<you>/ceremony-vault.git
+#   OPENAI_API_KEY         optional — server-side Whisper transcription
 app = "ceremony-agent"
 primary_region = "ord"
 

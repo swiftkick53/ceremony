@@ -46,23 +46,32 @@ class Brain:
         self._client = None
         self._auth_failed = False
         self.last_mode = None
+        self.last_error = None
 
-    def _get_client(self):
+    def client(self):
+        """The shared Anthropic client — also used by research and reweave."""
         if self._client is None:
             import anthropic
             self._client = anthropic.Anthropic()
         return self._client
+
+    _get_client = client  # old name, kept for callers/tests
 
     def decide(self, text: str, topics: list[dict], excerpts: dict[str, str]) -> FilingDecision:
         if not self._auth_failed:
             try:
                 decision = self._claude(text, topics, excerpts)
                 self.last_mode = "claude"
+                self.last_error = None
                 return decision
             except Exception as e:
                 import anthropic
                 if isinstance(e, anthropic.AuthenticationError):
                     self._auth_failed = True
+                # a transient failure (rate limit, network) falls through to the
+                # lexical tier for THIS dump only — and is recorded, not swallowed,
+                # so /api/state can say why the brain went lexical
+                self.last_error = f"{type(e).__name__}: {e}"[:300]
         self.last_mode = "lexical"
         return self._lexical(text, topics, excerpts)
 
