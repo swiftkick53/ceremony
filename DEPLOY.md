@@ -62,6 +62,28 @@ Archive → Distribute → TestFlight (or run directly on a cabled device).
 App Store proper is deliberately out of scope — a single-user app pointed at a
 personal server will not pass review; TestFlight is the intended channel.
 
+## Free hosting — the agent lives on your Mac
+
+No Fly account needed. The agent runs as a login service on the Mac and the
+phone reaches it over Tailscale (free personal plan) with a real HTTPS URL —
+from anywhere, whenever the Mac is awake. Asleep? The app's outbox holds
+dumps and files them on reconnect.
+
+```sh
+cd <this repo>
+./scripts/setup-mac.sh
+```
+
+The script installs dependencies, asks for your keys (Anthropic, app token,
+vault remote, optional OpenAI/Whisper), installs a launchd service that
+starts at login and restarts on crash, then prints the two Tailscale
+commands that give the phone its HTTPS address. Re-run it after `git pull`
+to update — it keeps your saved keys. `./scripts/setup-mac.sh logs` tails
+the agent; `./scripts/setup-mac.sh stop` removes the service.
+
+The vault clones to `~/CeremonyVault` (open it in Obsidian) and still syncs
+to your private `ceremony-vault` repo if you provide the remote URL.
+
 ## Local dev — unchanged
 
 No `CEREMONY_TOKEN` set = no auth; no `CEREMONY_VAULT_REMOTE` = local-only
